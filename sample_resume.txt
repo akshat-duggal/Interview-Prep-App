@@ -1,0 +1,65 @@
+
+JOHN DOE
+Email: john.doe@email.com | Phone: +1-234-567-8900
+LinkedIn: linkedin.com/in/johndoe | GitHub: github.com/johndoe
+
+PROFESSIONAL SUMMARY
+Results-driven Software Engineer with 3+ years of experience in full-stack development. 
+Proficient in Python, JavaScript, and cloud technologies.
+
+TECHNICAL SKILLS
+Languages: Python, JavaScript, Java, C++, SQL
+Frameworks: React, Node.js, Django, Flask, Spring Boot
+Databases: MySQL, PostgreSQL, MongoDB, Redis
+Cloud & DevOps: AWS, Docker, Kubernetes, Jenkins, Git
+Other: Machine Learning, Data Analysis, REST API, Agile, Scrum
+
+WORK EXPERIENCE
+
+Senior Software Engineer | Tech Corp Inc.
+June 2022 - Present
+- Developed and maintained microservices architecture serving 1M+ users
+- Implemented CI/CD pipeline reducing deployment time by 60%
+- Led team of 3 junior developers on e-commerce platform redesign
+- Technologies: Python, Django, AWS, Docker, PostgreSQL
+
+Software Developer | StartUp Solutions
+Jan 2021 - May 2022
+- Built responsive web applications using React and Node.js
+- Optimized database queries improving application performance by 40%
+- Collaborated with cross-functional teams in Agile environment
+- Technologies: JavaScript, React, Node.js, MongoDB
+
+Junior Developer | Digital Agency
+June 2020 - Dec 2020
+- Developed client websites and web applications
+- Fixed bugs and implemented new features based on client feedback
+- Technologies: HTML, CSS, JavaScript, PHP
+
+EDUCATION
+
+Bachelor of Technology in Computer Science
+State University | 2016 - 2020
+CGPA: 8.5/10
+
+PROJECTS
+
+E-Commerce Platform | Python, Django, React, AWS
+- Built full-stack e-commerce application with payment integration
+- Implemented user authentication and authorization
+- Deployed on AWS with auto-scaling capabilities
+
+Machine Learning Model | Python, TensorFlow, Scikit-learn
+- Developed predictive model for customer churn with 85% accuracy
+- Performed data preprocessing and feature engineering
+- Created visualization dashboard using Plotly
+
+CERTIFICATIONS
+- AWS Certified Developer Associate
+- Google Cloud Professional
+- Certified Scrum Master (CSM)
+
+ACHIEVEMENTS
+- Won Best Innovation Award at company hackathon 2023
+- Published technical article with 10K+ views
+- Mentor for Google Summer of Code 2023
