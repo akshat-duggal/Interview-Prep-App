@@ -1791,79 +1791,86 @@ else:
                     except Exception as e:
                         st.error(f"❌ Question generation failed: {str(e)}")
             
-            # Interview Session
+# Interview Session
             if st.session_state.current_interview:
                 st.markdown("---")
                 
                 questions = st.session_state.current_interview['questions']
                 current_q = st.session_state.current_interview['current_question']
                 
-                # Progress bar
-                progress = (current_q / len(questions)) * 100
-                st.progress(current_q / len(questions))
-                st.markdown(f"**Progress:** Question {current_q + 1} of {len(questions)} ({progress:.0f}%)")
-                
-                if current_q < len(questions):
-                    # Display current question
-                    question_obj = questions[current_q]
-                    
-                    st.markdown(f"""
-                        <div class="question-card">
-                            <span class="question-number">Question {current_q + 1}</span>
-                            <span class="badge badge-info" style="margin-left: 0.5rem;">{question_obj['type']}</span>
-                            <span class="badge badge-warning" style="margin-left: 0.5rem;">{question_obj['difficulty']}</span>
-                            <p style="margin-top: 1rem; font-size: 1.1rem; color: #1f2937;">{question_obj['question']}</p>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    # Answer input
-                    answer = st.text_area(
-                        "Your Answer",
-                        height=200,
-                        placeholder="Type your answer here...",
-                        key=f"answer_{current_q}"
-                    )
-                    
-                    col1, col2, col3 = st.columns([1, 1, 2])
-                    
-                    with col1:
-                        if st.button("⏭️ Skip Question"):
-                            st.session_state.current_interview['answers'].append("")
-                            st.session_state.current_interview['current_question'] += 1
-                            st.rerun()
-                    
-                    with col2:
-                        if st.button("✅ Submit Answer", type="primary", disabled=not answer):
-                            st.session_state.current_interview['answers'].append(answer)
-                            st.session_state.current_interview['current_question'] += 1
-                            st.rerun()
-                
+                # Check if questions exist
+                if not questions or len(questions) == 0:
+                    st.error("❌ No questions were generated. Please try again.")
+                    if st.button("🔄 Generate New Questions"):
+                        st.session_state.current_interview = None
+                        st.rerun()
                 else:
-                    # Interview completed - show evaluation
-                    st.markdown("---")
-                    st.success("🎉 Interview Complete! Evaluating your answers...")
+                    # Progress bar
+                    progress = (current_q / len(questions)) * 100
+                    st.progress(current_q / len(questions))
+                    st.markdown(f"**Progress:** Question {current_q + 1} of {len(questions)} ({progress:.0f}%)")
                     
-                    if st.button("📊 View Results", type="primary"):
-                        with st.spinner("Evaluating your performance..."):
-                            try:
-                                # Evaluate all answers
-                                results = conduct_mock_interview(
-                                    st.session_state.resume_data,
-                                    questions,
-                                    st.session_state.current_interview['answers']
-                                )
-                                
-                                # Save to history
-                                results['interview_type'] = st.session_state.current_interview['interview_type']
-                                save_interview_results(results)
-                                
-                                # Clear current interview
-                                st.session_state.current_interview = None
-                                st.session_state.interview_results = results
-                                
+                    if current_q < len(questions):
+                        # Display current question
+                        question_obj = questions[current_q]
+                        
+                        st.markdown(f"""
+                            <div class="question-card">
+                                <span class="question-number">Question {current_q + 1}</span>
+                                <span class="badge badge-info" style="margin-left: 0.5rem;">{question_obj['type']}</span>
+                                <span class="badge badge-warning" style="margin-left: 0.5rem;">{question_obj['difficulty']}</span>
+                                <p style="margin-top: 1rem; font-size: 1.1rem; color: #1f2937;">{question_obj['question']}</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        # Answer input
+                        answer = st.text_area(
+                            "Your Answer",
+                            height=200,
+                            placeholder="Type your answer here...",
+                            key=f"answer_{current_q}"
+                        )
+                        
+                        col1, col2, col3 = st.columns([1, 1, 2])
+                        
+                        with col1:
+                            if st.button("⏭️ Skip Question"):
+                                st.session_state.current_interview['answers'].append("")
+                                st.session_state.current_interview['current_question'] += 1
                                 st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ Evaluation failed: {str(e)}")
+                        
+                        with col2:
+                            if st.button("✅ Submit Answer", type="primary", disabled=not answer):
+                                st.session_state.current_interview['answers'].append(answer)
+                                st.session_state.current_interview['current_question'] += 1
+                                st.rerun()
+                    
+                    else:
+                        # Interview completed - show evaluation
+                        st.markdown("---")
+                        st.success("🎉 Interview Complete! Evaluating your answers...")
+                        
+                        if st.button("📊 View Results", type="primary"):
+                            with st.spinner("Evaluating your performance..."):
+                                try:
+                                    # Evaluate all answers
+                                    results = conduct_mock_interview(
+                                        st.session_state.resume_data,
+                                        questions,
+                                        st.session_state.current_interview['answers']
+                                    )
+                                    
+                                    # Save to history
+                                    results['interview_type'] = st.session_state.current_interview['interview_type']
+                                    save_interview_results(results)
+                                    
+                                    # Clear current interview
+                                    st.session_state.current_interview = None
+                                    st.session_state.interview_results = results
+                                    
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"❌ Evaluation failed: {str(e)}")
             
             # Show results if available
             if 'interview_results' in st.session_state and st.session_state.interview_results:
