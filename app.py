@@ -1285,24 +1285,18 @@ with st.sidebar:
         if st.button("✅ Save API Keys"):
             if groq_key and gemini_key:
                 try:
-                    # Test Groq
+                    # Initialize Groq client
                     st.session_state.groq_client = Groq(api_key=groq_key)
-                    test = st.session_state.groq_client.chat.completions.create(
-                        messages=[{"role": "user", "content": "Hi"}],
-                        model="llama-3.3-70b-versatile",
-                        max_tokens=5
-                    )
                     
-                    # Test Gemini
+                    # Initialize Gemini
                     genai.configure(api_key=gemini_key)
                     st.session_state.gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
-                    test2 = st.session_state.gemini_model.generate_content("Hi")
                     
                     st.session_state.api_keys_set = True
-                    st.success("✅ API keys validated!")
+                    st.success("✅ API keys saved successfully!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ API validation failed: {str(e)}")
+                    st.error(f"❌ Error: {str(e)}")
             else:
                 st.error("Please enter both API keys")
     else:
