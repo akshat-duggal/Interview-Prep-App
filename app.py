@@ -20,12 +20,15 @@ def get_groq_client():
     if 'groq_client' not in st.session_state or st.session_state.groq_client is None:
         if 'groq_api_key' in st.session_state and st.session_state.groq_api_key:
             try:
-                st.session_state.groq_client = Groq(api_key=st.session_state.groq_api_key)
-            except TypeError:
-                # Handle the proxies parameter issue
                 import os
+                # Set API key as environment variable
                 os.environ['GROQ_API_KEY'] = st.session_state.groq_api_key
+                # Initialize without api_key parameter (will use env var)
+                from groq import Groq
                 st.session_state.groq_client = Groq()
+            except Exception as e:
+                st.error(f"Failed to initialize Groq client: {str(e)}")
+                return None
     return st.session_state.groq_client
 
 # ============================================================================
@@ -1290,7 +1293,7 @@ if 'initialized' not in st.session_state:
     st.session_state.gemini_api_key = None
     st.session_state.groq_client = None
     st.session_state.gemini_model = None
-    
+
 # Sidebar for API Keys
 with st.sidebar:
     st.markdown("### 🔑 API Configuration")
