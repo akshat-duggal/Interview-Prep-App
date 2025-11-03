@@ -11,6 +11,19 @@ import json
 import re
 from typing import Dict, List, Optional
 
+def get_groq_client():
+    """Get or create Groq client with lazy initialization."""
+    if 'groq_client' not in st.session_state or get_groq_client() is None:
+        if 'groq_api_key' in st.session_state and st.session_state.groq_api_key:
+            try:
+                get_groq_client() = Groq(api_key=st.session_state.groq_api_key)
+            except TypeError:
+                # Handle the proxies parameter issue
+                import os
+                os.environ['GROQ_API_KEY'] = st.session_state.groq_api_key
+                get_groq_client() = Groq()
+    return get_groq_client()
+
 # ============================================================================
 # HELPER FUNCTIONS FROM PREVIOUS CELLS
 # ============================================================================
@@ -415,7 +428,7 @@ def complete_job_match_analysis(resume_data: Dict, job_description: str) -> Dict
     job_req = extract_job_requirements(job_description)
     match_score = calculate_match_score(resume_data, job_req)
     gemini_report = generate_job_match_report_with_gemini(resume_data, job_description, match_score, st.session_state.gemini_model)
-    cover_letter = generate_tailored_cover_letter(resume_data, job_description, st.session_state.groq_client)
+    cover_letter = generate_tailored_cover_letter(resume_data, job_description, get_groq_client())
     
     return {
         'match_score': match_score['total_score'],
@@ -592,20 +605,20 @@ def generate_complete_interview_set(resume_data: Dict, interview_type: str, diff
     all_questions = []
     
     if interview_type == "Technical":
-        all_questions.extend(generate_technical_questions(resume_data, difficulty, 8, st.session_state.groq_client))
-        all_questions.extend(generate_resume_based_questions(resume_data, 3, st.session_state.groq_client))
+        all_questions.extend(generate_technical_questions(resume_data, difficulty, 8, get_groq_client()))
+        all_questions.extend(generate_resume_based_questions(resume_data, 3, get_groq_client()))
     elif interview_type == "Behavioral":
-        all_questions.extend(generate_behavioral_questions(7, st.session_state.groq_client))
-        all_questions.extend(generate_situational_questions(resume_data, 4, st.session_state.groq_client))
+        all_questions.extend(generate_behavioral_questions(7, get_groq_client()))
+        all_questions.extend(generate_situational_questions(resume_data, 4, get_groq_client()))
     elif interview_type == "Mixed":
-        all_questions.extend(generate_technical_questions(resume_data, difficulty, 4, st.session_state.groq_client))
-        all_questions.extend(generate_behavioral_questions(3, st.session_state.groq_client))
-        all_questions.extend(generate_resume_based_questions(resume_data, 2, st.session_state.groq_client))
+        all_questions.extend(generate_technical_questions(resume_data, difficulty, 4, get_groq_client()))
+        all_questions.extend(generate_behavioral_questions(3, get_groq_client()))
+        all_questions.extend(generate_resume_based_questions(resume_data, 2, get_groq_client()))
     else:  # Full
-        all_questions.extend(generate_technical_questions(resume_data, difficulty, 5, st.session_state.groq_client))
-        all_questions.extend(generate_behavioral_questions(4, st.session_state.groq_client))
-        all_questions.extend(generate_situational_questions(resume_data, 3, st.session_state.groq_client))
-        all_questions.extend(generate_resume_based_questions(resume_data, 3, st.session_state.groq_client))
+        all_questions.extend(generate_technical_questions(resume_data, difficulty, 5, get_groq_client()))
+        all_questions.extend(generate_behavioral_questions(4, get_groq_client()))
+        all_questions.extend(generate_situational_questions(resume_data, 3, get_groq_client()))
+        all_questions.extend(generate_resume_based_questions(resume_data, 3, get_groq_client()))
     
     return {
         'interview_type': interview_type,
@@ -736,7 +749,7 @@ def conduct_mock_interview(resume_data: Dict, questions: List[Dict], answers: Li
         question = question_obj['question']
         question_type = question_obj['type']
         
-        evaluation = evaluate_answer_with_groq(question, answer, question_type, st.session_state.groq_client)
+        evaluation = evaluate_answer_with_groq(question, answer, question_type, get_groq_client())
         sentiment = analyze_answer_sentiment(answer)
         
         result = {
@@ -802,7 +815,7 @@ Provide:
 4. 2-WEEK TIMELINE"""
 
     try:
-        response = st.session_state.groq_client.chat.completions.create(
+        response = get_groq_client().chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=800,
@@ -1269,7 +1282,7 @@ if 'initialized' not in st.session_state:
     st.session_state.interview_history = []
     st.session_state.current_interview = None
     st.session_state.api_keys_set = False
-    st.session_state.groq_client = None
+    get_groq_client() = None
     st.session_state.gemini_model = None
 
 # Sidebar for API Keys
@@ -1285,8 +1298,9 @@ with st.sidebar:
         if st.button("✅ Save API Keys"):
             if groq_key and gemini_key:
                 try:
-                    # Initialize Groq client
-                    st.session_state.groq_client = Groq(api_key=groq_key)
+                    # Store keys in session state for later use
+                    st.session_state.groq_api_key = groq_key
+                    st.session_state.gemini_api_key = gemini_key
                     
                     # Initialize Gemini
                     genai.configure(api_key=gemini_key)
@@ -1303,6 +1317,10 @@ with st.sidebar:
         st.success("✅ API Keys Configured")
         if st.button("🔄 Reset API Keys"):
             st.session_state.api_keys_set = False
+            st.session_state.groq_api_key = None
+            st.session_state.gemini_api_key = None
+            get_groq_client() = None
+            st.session_state.gemini_model = None
             st.rerun()
     
     st.markdown("---")
