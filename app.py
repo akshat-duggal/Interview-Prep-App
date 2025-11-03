@@ -1356,7 +1356,8 @@ with st.sidebar:
     page = st.radio(
         "Go to:",
         ["🏠 Home", "📄 Resume Analysis", "🎯 Job Matcher", "🎤 Mock Interview", "📊 Dashboard"],
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="navigation_radio"  # Add this unique key
     )
     
     st.markdown("---")
