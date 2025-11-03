@@ -1290,7 +1290,7 @@ if 'initialized' not in st.session_state:
     st.session_state.gemini_api_key = None
     st.session_state.groq_client = None
     st.session_state.gemini_model = None
-
+    
 # Sidebar for API Keys
 with st.sidebar:
     st.markdown("### 🔑 API Configuration")
@@ -1321,6 +1321,23 @@ with st.sidebar:
                 st.error("Please enter both API keys")
     else:
         st.success("✅ API Keys Configured")
+        
+        # Test Groq connection
+        if st.button("🧪 Test Groq API"):
+            try:
+                client = get_groq_client()
+                if client:
+                    response = client.chat.completions.create(
+                        messages=[{"role": "user", "content": "Say 'working' if you can hear me"}],
+                        model="llama-3.3-70b-versatile",
+                        max_tokens=10
+                    )
+                    st.success(f"✅ Groq API working! Response: {response.choices[0].message.content}")
+                else:
+                    st.error("❌ Groq client is None")
+            except Exception as e:
+                st.error(f"❌ Groq test failed: {str(e)}")
+        
         if st.button("🔄 Reset API Keys"):
             st.session_state.api_keys_set = False
             st.session_state.groq_api_key = None
@@ -1328,6 +1345,26 @@ with st.sidebar:
             st.session_state.groq_client = None
             st.session_state.gemini_model = None
             st.rerun()
+    
+    st.markdown("---")
+    
+    # Navigation
+    st.markdown("### 📍 Navigation")
+    page = st.radio(
+        "Go to:",
+        ["🏠 Home", "📄 Resume Analysis", "🎯 Job Matcher", "🎤 Mock Interview", "📊 Dashboard"],
+        label_visibility="collapsed"
+    )
+    
+    st.markdown("---")
+    st.markdown("### 📈 Quick Stats")
+    if st.session_state.resume_data:
+        st.metric("Skills Found", len(st.session_state.resume_data.get('skills', [])))
+    if st.session_state.interview_history:
+        st.metric("Interviews Done", len(st.session_state.interview_history))
+        avg_score = sum(i['overall_score'] for i in st.session_state.interview_history) / len(st.session_state.interview_history)
+        st.metric("Average Score", f"{avg_score:.1f}%")
+
     
     st.markdown("---")
     
