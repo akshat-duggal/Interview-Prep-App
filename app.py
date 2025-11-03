@@ -1,4 +1,3 @@
-
 import streamlit as st
 import PyPDF2
 import pdfplumber
@@ -782,7 +781,7 @@ def conduct_mock_interview(resume_data: Dict, questions: List[Dict], answers: Li
         'average_confidence': sum(r['sentiment']['confidence_score'] for r in interview_results) / len(interview_results) if interview_results else 0
     }
 
-def generate_improvement_plan(interview_results: Dict, groq_client) -> str:
+def generate_improvement_plan(interview_results: Dict) -> str:
     """Generate improvement plan."""
     weaknesses = ', '.join(interview_results['weaknesses']) if interview_results['weaknesses'] else "None"
     strengths = ', '.join(interview_results['strengths']) if interview_results['strengths'] else "Various"
@@ -803,7 +802,7 @@ Provide:
 4. 2-WEEK TIMELINE"""
 
     try:
-        response = groq_client.chat.completions.create(
+        response = st.session_state.groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=800,
@@ -1012,257 +1011,9 @@ def get_motivational_message(score: float) -> str:
     else:
         return "Don't give up! Practice makes perfect! 💡"
 
-# UI Components (from Cell 10)
-
-    <style>
-    /* Import Google Fonts */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
-    
-    /* Global Styles */
-    * {
-        font-family: 'Inter', sans-serif;
-    }
-    
-    /* Main container */
-    .main {
-        padding: 2rem;
-    }
-    
-    /* Custom header styles */
-    .main-header {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 2rem;
-        border-radius: 15px;
-        color: white;
-        text-align: center;
-        margin-bottom: 2rem;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-    }
-    
-    .main-header h1 {
-        margin: 0;
-        font-size: 2.5rem;
-        font-weight: 700;
-    }
-    
-    .main-header p {
-        margin: 0.5rem 0 0 0;
-        font-size: 1.1rem;
-        opacity: 0.9;
-    }
-    
-    /* Score card styles */
-    .score-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 12px;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-        text-align: center;
-        margin: 1rem 0;
-        border-left: 5px solid #667eea;
-    }
-    
-    .score-card.excellent {
-        border-left-color: #10b981;
-    }
-    
-    .score-card.good {
-        border-left-color: #3b82f6;
-    }
-    
-    .score-card.fair {
-        border-left-color: #f59e0b;
-    }
-    
-    .score-card.poor {
-        border-left-color: #ef4444;
-    }
-    
-    .score-value {
-        font-size: 3rem;
-        font-weight: 700;
-        color: #1f2937;
-        margin: 0;
-    }
-    
-    .score-label {
-        font-size: 1rem;
-        color: #6b7280;
-        margin: 0.5rem 0 0 0;
-    }
-    
-    /* Info box styles */
-    .info-box {
-        background: #f3f4f6;
-        padding: 1.5rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-        border-left: 4px solid #3b82f6;
-    }
-    
-    .info-box.success {
-        background: #ecfdf5;
-        border-left-color: #10b981;
-    }
-    
-    .info-box.warning {
-        background: #fffbeb;
-        border-left-color: #f59e0b;
-    }
-    
-    .info-box.error {
-        background: #fef2f2;
-        border-left-color: #ef4444;
-    }
-    
-    /* Metric card */
-    .metric-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-        margin: 0.5rem 0;
-    }
-    
-    .metric-value {
-        font-size: 2rem;
-        font-weight: 700;
-        color: #667eea;
-    }
-    
-    .metric-label {
-        font-size: 0.9rem;
-        color: #6b7280;
-        margin-top: 0.5rem;
-    }
-    
-    /* Progress bar custom */
-    .progress-bar {
-        background: #e5e7eb;
-        border-radius: 10px;
-        height: 12px;
-        overflow: hidden;
-        margin: 1rem 0;
-    }
-    
-    .progress-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        border-radius: 10px;
-        transition: width 0.3s ease;
-    }
-    
-    /* Button styles */
-    .stButton>button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 0.75rem 2rem;
-        border-radius: 8px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-    }
-    
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-    }
-    
-    /* Tabs styling */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 8px 8px 0 0;
-        padding: 10px 20px;
-        background-color: #f3f4f6;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-    }
-    
-    /* Question card */
-    .question-card {
-        background: white;
-        padding: 1.5rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-        margin: 1rem 0;
-        border-left: 4px solid #667eea;
-    }
-    
-    .question-number {
-        background: #667eea;
-        color: white;
-        padding: 0.3rem 0.8rem;
-        border-radius: 20px;
-        font-size: 0.9rem;
-        font-weight: 600;
-        display: inline-block;
-        margin-bottom: 0.5rem;
-    }
-    
-    /* Badge styles */
-    .badge {
-        display: inline-block;
-        padding: 0.4rem 0.8rem;
-        border-radius: 20px;
-        font-size: 0.85rem;
-        font-weight: 600;
-        margin: 0.2rem;
-    }
-    
-    .badge-success {
-        background: #d1fae5;
-        color: #065f46;
-    }
-    
-    .badge-warning {
-        background: #fef3c7;
-        color: #92400e;
-    }
-    
-    .badge-info {
-        background: #dbeafe;
-        color: #1e40af;
-    }
-    
-    .badge-danger {
-        background: #fee2e2;
-        color: #991b1b;
-    }
-    
-    /* Divider */
-    .divider {
-        height: 2px;
-        background: linear-gradient(90deg, transparent, #667eea, transparent);
-        margin: 2rem 0;
-    }
-    
-    /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    
-    </style>
-    
-
-
-
-import streamlit as st
-import PyPDF2
-import pdfplumber
-from groq import Groq
-import google.generativeai as genai
-import plotly.graph_objects as go
-import plotly.express as px
-import pandas as pd
-from datetime import datetime
-import json
-import re
-from typing import Dict, List
+# ============================================================================
+# STREAMLIT APP START
+# ============================================================================
 
 # Page configuration
 st.set_page_config(
@@ -1544,7 +1295,7 @@ with st.sidebar:
                     
                     # Test Gemini
                     genai.configure(api_key=gemini_key)
-                    st.session_state.gemini_model = genai.GenerativeModel('gemini-2.5-flash')
+                    st.session_state.gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
                     test2 = st.session_state.gemini_model.generate_content("Hi")
                     
                     st.session_state.api_keys_set = True
@@ -1804,8 +1555,6 @@ else:
             skills_html += '</div>'
             st.markdown(skills_html, unsafe_allow_html=True)
 
-
-    
     elif page == "🎯 Job Matcher":
         st.markdown("""
             <div class="main-header">
@@ -2197,8 +1946,6 @@ else:
                     st.session_state.interview_results = None
                     st.rerun()
 
-
-    
     elif page == "📊 Dashboard":
         st.markdown("""
             <div class="main-header">
@@ -2411,5 +2158,3 @@ st.markdown("""
         <p style="font-size: 0.9rem;">🎯 AI Interview Prep & Resume Analyzer v1.0</p>
     </div>
 """, unsafe_allow_html=True)
-
-
