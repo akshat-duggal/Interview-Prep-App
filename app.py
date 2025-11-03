@@ -11,18 +11,22 @@ import json
 import re
 from typing import Dict, List, Optional
 
+# ============================================================================
+# GROQ CLIENT HELPER
+# ============================================================================
+
 def get_groq_client():
     """Get or create Groq client with lazy initialization."""
-    if 'groq_client' not in st.session_state or get_groq_client() is None:
+    if 'groq_client' not in st.session_state or st.session_state.groq_client is None:
         if 'groq_api_key' in st.session_state and st.session_state.groq_api_key:
             try:
-                get_groq_client() = Groq(api_key=st.session_state.groq_api_key)
+                st.session_state.groq_client = Groq(api_key=st.session_state.groq_api_key)
             except TypeError:
                 # Handle the proxies parameter issue
                 import os
                 os.environ['GROQ_API_KEY'] = st.session_state.groq_api_key
-                get_groq_client() = Groq()
-    return get_groq_client()
+                st.session_state.groq_client = Groq()
+    return st.session_state.groq_client
 
 # ============================================================================
 # HELPER FUNCTIONS FROM PREVIOUS CELLS
@@ -396,7 +400,7 @@ Provide:
     except:
         return "Report unavailable."
 
-def generate_tailored_cover_letter(resume_data: Dict, job_description: str, groq_client) -> str:
+def generate_tailored_cover_letter(resume_data: Dict, job_description: str) -> str:
     """Generate cover letter with Groq."""
     prompt = f"""Write a professional cover letter.
 
@@ -413,7 +417,7 @@ Write 250-300 words covering:
 4. Call to action"""
 
     try:
-        response = groq_client.chat.completions.create(
+        response = get_groq_client().chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=500,
@@ -428,7 +432,7 @@ def complete_job_match_analysis(resume_data: Dict, job_description: str) -> Dict
     job_req = extract_job_requirements(job_description)
     match_score = calculate_match_score(resume_data, job_req)
     gemini_report = generate_job_match_report_with_gemini(resume_data, job_description, match_score, st.session_state.gemini_model)
-    cover_letter = generate_tailored_cover_letter(resume_data, job_description, get_groq_client())
+    cover_letter = generate_tailored_cover_letter(resume_data, job_description)
     
     return {
         'match_score': match_score['total_score'],
@@ -442,7 +446,7 @@ def complete_job_match_analysis(resume_data: Dict, job_description: str) -> Dict
     }
 
 # Interview Question Generation (from Cell 7)
-def generate_technical_questions(resume_data: Dict, difficulty: str, num_questions: int, groq_client) -> List[Dict]:
+def generate_technical_questions(resume_data: Dict, difficulty: str, num_questions: int) -> List[Dict]:
     """Generate technical questions."""
     skills_list = ', '.join(resume_data['skills'][:10])
     
@@ -458,7 +462,7 @@ Follow-up: [Follow-up]
 Continue for all questions."""
 
     try:
-        response = groq_client.chat.completions.create(
+        response = get_groq_client().chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=1500,
@@ -483,7 +487,7 @@ Continue for all questions."""
     except:
         return []
 
-def generate_behavioral_questions(num_questions: int, groq_client) -> List[Dict]:
+def generate_behavioral_questions(num_questions: int) -> List[Dict]:
     """Generate behavioral questions."""
     prompt = f"""Generate {num_questions} behavioral interview questions using STAR method.
 
@@ -494,7 +498,7 @@ What to listen for: [Points]
 Continue for all questions."""
 
     try:
-        response = groq_client.chat.completions.create(
+        response = get_groq_client().chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=1000,
@@ -519,7 +523,7 @@ Continue for all questions."""
     except:
         return []
 
-def generate_situational_questions(resume_data: Dict, num_questions: int, groq_client) -> List[Dict]:
+def generate_situational_questions(resume_data: Dict, num_questions: int) -> List[Dict]:
     """Generate situational questions."""
     prompt = f"""Generate {num_questions} situational questions.
 
@@ -532,7 +536,7 @@ Q1: [Scenario and question]
 Evaluation: [Criteria]"""
 
     try:
-        response = groq_client.chat.completions.create(
+        response = get_groq_client().chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=1000,
@@ -557,7 +561,7 @@ Evaluation: [Criteria]"""
     except:
         return []
 
-def generate_resume_based_questions(resume_data: Dict, num_questions: int, groq_client) -> List[Dict]:
+def generate_resume_based_questions(resume_data: Dict, num_questions: int) -> List[Dict]:
     """Generate resume-based questions."""
     skills = ', '.join(resume_data['skills'][:10])
     exp_summary = ""
@@ -575,7 +579,7 @@ Q1: [Question about resume]
 Why: [Reasoning]"""
 
     try:
-        response = groq_client.chat.completions.create(
+        response = get_groq_client().chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=1000,
@@ -605,20 +609,20 @@ def generate_complete_interview_set(resume_data: Dict, interview_type: str, diff
     all_questions = []
     
     if interview_type == "Technical":
-        all_questions.extend(generate_technical_questions(resume_data, difficulty, 8, get_groq_client()))
-        all_questions.extend(generate_resume_based_questions(resume_data, 3, get_groq_client()))
+        all_questions.extend(generate_technical_questions(resume_data, difficulty, 8))
+        all_questions.extend(generate_resume_based_questions(resume_data, 3))
     elif interview_type == "Behavioral":
-        all_questions.extend(generate_behavioral_questions(7, get_groq_client()))
-        all_questions.extend(generate_situational_questions(resume_data, 4, get_groq_client()))
+        all_questions.extend(generate_behavioral_questions(7))
+        all_questions.extend(generate_situational_questions(resume_data, 4))
     elif interview_type == "Mixed":
-        all_questions.extend(generate_technical_questions(resume_data, difficulty, 4, get_groq_client()))
-        all_questions.extend(generate_behavioral_questions(3, get_groq_client()))
-        all_questions.extend(generate_resume_based_questions(resume_data, 2, get_groq_client()))
+        all_questions.extend(generate_technical_questions(resume_data, difficulty, 4))
+        all_questions.extend(generate_behavioral_questions(3))
+        all_questions.extend(generate_resume_based_questions(resume_data, 2))
     else:  # Full
-        all_questions.extend(generate_technical_questions(resume_data, difficulty, 5, get_groq_client()))
-        all_questions.extend(generate_behavioral_questions(4, get_groq_client()))
-        all_questions.extend(generate_situational_questions(resume_data, 3, get_groq_client()))
-        all_questions.extend(generate_resume_based_questions(resume_data, 3, get_groq_client()))
+        all_questions.extend(generate_technical_questions(resume_data, difficulty, 5))
+        all_questions.extend(generate_behavioral_questions(4))
+        all_questions.extend(generate_situational_questions(resume_data, 3))
+        all_questions.extend(generate_resume_based_questions(resume_data, 3))
     
     return {
         'interview_type': interview_type,
@@ -628,7 +632,7 @@ def generate_complete_interview_set(resume_data: Dict, interview_type: str, diff
     }
 
 # Answer Evaluation (from Cell 8)
-def evaluate_answer_with_groq(question: str, answer: str, question_type: str, groq_client) -> Dict:
+def evaluate_answer_with_groq(question: str, answer: str, question_type: str) -> Dict:
     """Evaluate interview answer."""
     prompt = f"""Evaluate this answer.
 
@@ -658,7 +662,7 @@ FEEDBACK:
 [2-3 sentences]"""
 
     try:
-        response = groq_client.chat.completions.create(
+        response = get_groq_client().chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=800,
@@ -749,7 +753,7 @@ def conduct_mock_interview(resume_data: Dict, questions: List[Dict], answers: Li
         question = question_obj['question']
         question_type = question_obj['type']
         
-        evaluation = evaluate_answer_with_groq(question, answer, question_type, get_groq_client())
+        evaluation = evaluate_answer_with_groq(question, answer, question_type)
         sentiment = analyze_answer_sentiment(answer)
         
         result = {
@@ -1282,7 +1286,9 @@ if 'initialized' not in st.session_state:
     st.session_state.interview_history = []
     st.session_state.current_interview = None
     st.session_state.api_keys_set = False
-    get_groq_client() = None
+    st.session_state.groq_api_key = None
+    st.session_state.gemini_api_key = None
+    st.session_state.groq_client = None
     st.session_state.gemini_model = None
 
 # Sidebar for API Keys
@@ -1319,7 +1325,7 @@ with st.sidebar:
             st.session_state.api_keys_set = False
             st.session_state.groq_api_key = None
             st.session_state.gemini_api_key = None
-            get_groq_client() = None
+            st.session_state.groq_client = None
             st.session_state.gemini_model = None
             st.rerun()
     
