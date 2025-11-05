@@ -1,1324 +1,483 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-import plotly.express as px
+import PyPDF2
+import pdfplumber
+from groq import Groq
+import google.generativeai as genai
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-import warnings
-warnings.filterwarnings('ignore')
+import plotly.express as px
+import pandas as pd
+from datetime import datetime
+import json
+import re
+from typing import Dict, List, Optional
 
 # ============================================================================
-# PAGE CONFIGURATION
+# HELPER FUNCTIONS
 # ============================================================================
+
+def extract_text_from_pdf(pdf_file) -> str:
+    """Extract text from uploaded PDF file."""
+    text = ""
+    try:
+        with pdfplumber.open(pdf_file) as pdf:
+            for page in pdf.pages:
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        if text.strip():
+            return text
+    except Exception as e:
+        try:
+            pdf_file.seek(0)
+            pdf_reader = PyPDF2.PdfReader(pdf_file)
+            for page_num in range(len(pdf_reader.pages)):
+                page = pdf_reader.pages[page_num]
+                text += page.extract_text() + "\n"
+            return text
+        except:
+            return ""
+    return text
+
+def extract_email(text: str) -> str:
+    """Extract email address from text."""
+    email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+    emails = re.findall(email_pattern, text)
+    return emails[0] if emails else "Not found"
+
+def extract_phone(text: str) -> str:
+    """Extract phone number from text."""
+    phone_patterns = [
+        r'\+?\d{1,3}[-\.\s]?\(?\d{3}\)?[-\.\s]?\d{3}[-\.\s]?\d{4}',
+        r'\+?\d{10,}',
+        r'\d{3}-\d{3}-\d{4}',
+    ]
+    for pattern in phone_patterns:
+        phones = re.findall(pattern, text)
+        if phones:
+            return phones[0]
+    return "Not found"
+
+def extract_skills(text: str) -> List[str]:
+    """Extract technical skills from resume text."""
+    skills_database = [
+        'python', 'java', 'javascript', 'c++', 'c#', 'ruby', 'php', 'swift',
+        'kotlin', 'go', 'rust', 'typescript', 'scala', 'r', 'matlab',
+        'html', 'css', 'react', 'angular', 'vue', 'node.js', 'express',
+        'django', 'flask', 'spring boot', 'asp.net', 'jquery',
+        'sql', 'mysql', 'postgresql', 'mongodb', 'redis', 'oracle',
+        'sqlite', 'cassandra', 'dynamodb', 'firebase',
+        'aws', 'azure', 'gcp', 'docker', 'kubernetes', 'jenkins', 'git',
+        'ci/cd', 'terraform', 'ansible', 'linux', 'shell scripting',
+        'machine learning', 'deep learning', 'tensorflow', 'pytorch',
+        'scikit-learn', 'pandas', 'numpy', 'data analysis', 'statistics',
+        'nlp', 'computer vision', 'opencv',
+        'agile', 'scrum', 'jira', 'rest api', 'graphql', 'microservices',
+        'testing', 'debugging', 'problem solving', 'communication'
+    ]
+    text_lower = text.lower()
+    found_skills = []
+    for skill in skills_database:
+        if skill in text_lower:
+            found_skills.append(skill.title())
+    return sorted(list(set(found_skills)))
+
+def extract_education(text: str) -> List[str]:
+    """Extract education information."""
+    education_keywords = ['bachelor', 'master', 'phd', 'b.tech', 'm.tech', 
+                         'b.e', 'm.e', 'bca', 'mca', 'degree', 'university',
+                         'college', 'institute', 'b.sc', 'm.sc']
+    lines = text.split('\n')
+    education = []
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        if any(keyword in line_lower for keyword in education_keywords):
+            edu_text = ' '.join(lines[i:i+3]).strip()
+            if edu_text and len(edu_text) > 10:
+                education.append(edu_text[:200])
+    return education[:3]
+
+def extract_experience(text: str) -> List[Dict[str, str]]:
+    """Extract work experience details."""
+    experience = []
+    job_keywords = ['engineer', 'developer', 'analyst', 'manager', 'designer',
+                   'consultant', 'intern', 'associate', 'specialist', 'lead']
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        line_lower = line.lower()
+        if any(keyword in line_lower for keyword in job_keywords):
+            exp_entry = {
+                'title': line.strip()[:100],
+                'description': ' '.join(lines[i+1:i+4]).strip()[:300]
+            }
+            experience.append(exp_entry)
+    return experience[:5]
+
+def structure_resume_data(text: str) -> Dict:
+    """Main function to structure all extracted resume data."""
+    structured_data = {
+        'raw_text': text,
+        'email': extract_email(text),
+        'phone': extract_phone(text),
+        'skills': extract_skills(text),
+        'education': extract_education(text),
+        'experience': extract_experience(text),
+        'total_words': len(text.split()),
+        'total_characters': len(text)
+    }
+    return structured_data
+
+def calculate_ats_score(resume_data: Dict) -> Dict:
+    """Calculate ATS compatibility score."""
+    score = 0
+    feedback = []
+    
+    if resume_data['email'] != "Not found":
+        score += 8
+        feedback.append("✅ Email found")
+    else:
+        feedback.append("❌ Missing email address")
+    
+    if resume_data['phone'] != "Not found":
+        score += 7
+        feedback.append("✅ Phone number found")
+    else:
+        feedback.append("❌ Missing phone number")
+    
+    num_skills = len(resume_data['skills'])
+    if num_skills >= 10:
+        score += 30
+        feedback.append(f"✅ Strong skills section ({num_skills} skills)")
+    elif num_skills >= 5:
+        score += 20
+        feedback.append(f"⚠️ Moderate skills section ({num_skills} skills)")
+    else:
+        score += 10
+        feedback.append(f"❌ Weak skills section ({num_skills} skills)")
+    
+    if len(resume_data['education']) >= 1:
+        score += 15
+        feedback.append("✅ Education section present")
+    else:
+        feedback.append("❌ Missing education section")
+    
+    num_exp = len(resume_data['experience'])
+    if num_exp >= 3:
+        score += 25
+        feedback.append(f"✅ Strong experience section ({num_exp} entries)")
+    elif num_exp >= 1:
+        score += 15
+        feedback.append(f"⚠️ Limited experience ({num_exp} entries)")
+    else:
+        feedback.append("❌ No experience section found")
+    
+    word_count = resume_data['total_words']
+    if 300 <= word_count <= 800:
+        score += 15
+        feedback.append(f"✅ Optimal length ({word_count} words)")
+    elif word_count < 300:
+        score += 5
+        feedback.append(f"⚠️ Too short ({word_count} words)")
+    else:
+        score += 10
+        feedback.append(f"⚠️ Too long ({word_count} words)")
+    
+    return {
+        'score': score,
+        'grade': 'A+' if score >= 90 else 'A' if score >= 80 else 'B' if score >= 70 else 'C' if score >= 60 else 'D',
+        'feedback': feedback
+    }
+
+def analyze_resume_with_gemini(resume_data: Dict, gemini_model) -> Dict:
+    """Use Gemini AI to provide deep analysis."""
+    prompt = f"""You are an expert resume reviewer. Analyze this resume and provide detailed feedback.
+
+RESUME DATA:
+- Total Words: {resume_data['total_words']}
+- Skills ({len(resume_data['skills'])}): {', '.join(resume_data['skills'][:15])}
+- Education Entries: {len(resume_data['education'])}
+- Experience Entries: {len(resume_data['experience'])}
+
+RESUME TEXT:
+{resume_data['raw_text'][:3000]}
+
+Provide:
+1. STRENGTHS (3-4 points)
+2. WEAKNESSES (3-4 points)
+3. MISSING KEYWORDS
+4. IMPROVEMENTS (5 suggestions)
+5. OVERALL IMPRESSION
+
+Format clearly with headers."""
+
+    try:
+        response = gemini_model.generate_content(prompt)
+        return {'success': True, 'analysis': response.text}
+    except Exception as e:
+        return {'success': False, 'analysis': "Analysis unavailable."}
+
+def generate_improvement_suggestions(resume_data: Dict, ats_score: Dict) -> List[str]:
+    """Generate improvement suggestions."""
+    suggestions = []
+    
+    if resume_data['email'] == "Not found":
+        suggestions.append("🔸 Add a professional email address")
+    if resume_data['phone'] == "Not found":
+        suggestions.append("🔸 Include a contact phone number")
+    if len(resume_data['skills']) < 8:
+        suggestions.append("🔸 Add more technical skills (aim for 10-15)")
+    if len(resume_data['education']) == 0:
+        suggestions.append("🔸 Add Education section")
+    if len(resume_data['experience']) < 2:
+        suggestions.append("🔸 Add more work experience details")
+    if resume_data['total_words'] < 300:
+        suggestions.append("🔸 Expand with more details")
+    
+    suggestions.append("🔸 Quantify achievements with numbers")
+    suggestions.append("🔸 Tailor resume for each job")
+    suggestions.append("🔸 Use industry-specific keywords")
+    
+    return suggestions[:8]
+
+def complete_resume_analysis(resume_data: Dict, gemini_model, groq_client) -> Dict:
+    """Complete resume analysis."""
+    ats_result = calculate_ats_score(resume_data)
+    gemini_analysis = analyze_resume_with_gemini(resume_data, gemini_model)
+    suggestions = generate_improvement_suggestions(resume_data, ats_result)
+    
+    return {
+        'ats_score': ats_result['score'],
+        'ats_grade': ats_result['grade'],
+        'ats_feedback': ats_result['feedback'],
+        'gemini_analysis': gemini_analysis['analysis'],
+        'improvement_suggestions': suggestions,
+        'contact_info': {
+            'email': resume_data['email'],
+            'phone': resume_data['phone']
+        },
+        'stats': {
+            'total_skills': len(resume_data['skills']),
+            'total_experience': len(resume_data['experience']),
+            'total_education': len(resume_data['education']),
+            'word_count': resume_data['total_words']
+        }
+    }
+
+def format_score_badge(score: float) -> str:
+    """Generate score badge."""
+    if score >= 90:
+        return "🏆 Excellent"
+    elif score >= 80:
+        return "⭐ Very Good"
+    elif score >= 70:
+        return "✅ Good"
+    elif score >= 60:
+        return "👍 Fair"
+    elif score >= 50:
+        return "📈 Needs Work"
+    else:
+        return "⚠️ More Practice Needed"
+
+# ============================================================================
+# STREAMLIT APP
+# ============================================================================
+
 st.set_page_config(
-    page_title="Banking Analytics - ML Project",
-    page_icon="🏦",
+    page_title="AI Interview Prep & Resume Analyzer",
+    page_icon="🎯",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ============================================================================
-# CUSTOM CSS FOR LIGHT PROFESSIONAL THEME
-# ============================================================================
+# Custom CSS
 st.markdown("""
-    <style>
-    /* Import Google Fonts */
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&display=swap');
-    
-    /* Global font */
-    html, body, [class*="css"] {
-        font-family: 'Inter', sans-serif;
-    }
-    
-    /* Main background - Light gradient */
-    .main {
-        background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%);
-    }
-    
-    /* Sidebar styling - Professional Blue */
-    [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #1e40af 0%, #1e3a8a 100%);
-    }
-    
-    [data-testid="stSidebar"] * {
-        color: white !important;
-    }
-    
-    [data-testid="stSidebar"] .stMarkdown {
-        color: white !important;
-    }
-    
-    /* Metric cards */
-    [data-testid="stMetricValue"] {
-        font-size: 28px;
-        font-weight: 700;
-        color: #1e40af;
-    }
-    
-    [data-testid="stMetricLabel"] {
-        color: #475569;
-        font-weight: 500;
-    }
-    
-    [data-testid="stMetricDelta"] {
-        color: #059669;
-    }
-    
-    /* Headers */
-    h1 {
-        color: #0f172a !important;
-        font-weight: 900 !important;
-        padding: 25px;
-        background: white;
-        border-radius: 12px;
-        margin-bottom: 30px;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.07);
-        border-left: 6px solid #3b82f6;
-    }
-    
-    h2 {
-        color: #1e293b !important;
-        font-weight: 700 !important;
-        margin-top: 20px;
-    }
-    
-    h3 {
-        color: #334155 !important;
-        font-weight: 600 !important;
-    }
-    
-    h4 {
-        color: #475569 !important;
-        font-weight: 600 !important;
-    }
-    
-    /* Paragraph text */
-    p, li, span, div {
-        color: #334155;
-    }
-    
-    /* Tabs */
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 8px;
-        background-color: white;
-        padding: 10px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    
-    .stTabs [data-baseweb="tab"] {
-        background-color: #f1f5f9;
-        border-radius: 8px;
-        color: #475569;
-        font-weight: 600;
-        padding: 12px 24px;
-        border: 2px solid transparent;
-    }
-    
-    .stTabs [data-baseweb="tab"]:hover {
-        background-color: #e2e8f0;
-        border-color: #cbd5e1;
-    }
-    
-    .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-        color: white !important;
-        border-color: #3b82f6;
-    }
-    
-    /* Buttons */
-    .stButton>button {
-        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+<style>
+    .main {padding: 2rem;}
+    .main-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 2rem;
+        border-radius: 15px;
         color: white;
-        font-weight: 600;
-        border-radius: 8px;
-        border: none;
-        padding: 12px 28px;
-        box-shadow: 0 4px 6px rgba(59,130,246,0.3);
-        transition: all 0.3s ease;
+        text-align: center;
+        margin-bottom: 2rem;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
     }
-    
-    .stButton>button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(59,130,246,0.4);
-        background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+    .score-card {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        text-align: center;
+        margin: 1rem 0;
+        border-left: 5px solid #667eea;
     }
-    
-    /* Info boxes */
-    .stAlert {
-        background-color: white;
+    .score-value {
+        font-size: 3rem;
+        font-weight: 700;
+        color: #1f2937;
+    }
+    .metric-card {
+        background: white;
+        padding: 1.5rem;
         border-radius: 10px;
-        padding: 20px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    }
+    .info-box {
+        background: #f3f4f6;
+        padding: 1.5rem;
+        border-radius: 10px;
+        margin: 1rem 0;
         border-left: 4px solid #3b82f6;
     }
-    
-    /* Success boxes */
-    div[data-baseweb="notification"] {
-        background-color: white;
-        border-left: 4px solid #10b981;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    }
-    
-    /* Expander */
-    .streamlit-expanderHeader {
-        background-color: white;
-        border-radius: 8px;
-        color: #1e40af;
+    .info-box.success {background: #ecfdf5; border-left-color: #10b981;}
+    .info-box.warning {background: #fffbeb; border-left-color: #f59e0b;}
+    .info-box.error {background: #fef2f2; border-left-color: #ef4444;}
+    .badge {
+        display: inline-block;
+        padding: 0.4rem 0.8rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
         font-weight: 600;
-        border: 2px solid #e2e8f0;
+        margin: 0.2rem;
     }
-    
-    .streamlit-expanderHeader:hover {
-        border-color: #3b82f6;
-    }
-    
-    /* Dataframes */
-    .dataframe {
-        background-color: white !important;
-        border-radius: 8px;
-    }
-    
-    /* Select boxes and inputs */
-    .stSelectbox, .stMultiSelect, .stTextInput, .stNumberInput {
-        background-color: white;
-        border-radius: 8px;
-    }
-    
-    /* Radio buttons */
-    .stRadio > label {
-        background-color: white;
-        padding: 10px;
-        border-radius: 8px;
-        margin: 5px 0;
-    }
-    
-    /* Date input */
-    .stDateInput {
-        background-color: white;
-        border-radius: 8px;
-    }
-    
-    /* Container backgrounds */
-    [data-testid="stVerticalBlock"] > [style*="flex-direction: column;"] > [data-testid="stVerticalBlock"] {
-        background-color: rgba(255, 255, 255, 0.5);
-        border-radius: 10px;
-        padding: 15px;
-    }
-    
-    /* Plotly charts background */
-    .js-plotly-plot {
-        background-color: white !important;
-        border-radius: 10px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-    }
-    </style>
+    .badge-info {background: #dbeafe; color: #1e40af;}
+</style>
 """, unsafe_allow_html=True)
 
-# ============================================================================
-# LOAD DATA FUNCTION
-# ============================================================================
-@st.cache_data
-def load_data():
-    try:
-        df = pd.read_csv('cleaned_bank_data.csv')
-        df['month'] = pd.to_datetime(df['month'])
-        return df
-    except:
-        st.error("⚠️ Could not load 'cleaned_bank_data.csv'. Please ensure the file is in the same directory.")
-        # Generate sample data as fallback
-        dates = pd.date_range('2008-06-01', '2024-12-01', freq='MS')
-        banks = [f'Bank {i}' for i in range(1, 51)]
-        data = []
-        for date in dates:
-            for bank in banks:
-                data.append({
-                    'month': date,
-                    'bank_name': bank,
-                    'inward_total_amt': np.random.uniform(1e6, 1e8),
-                    'outward_total_amt': np.random.uniform(1e6, 1e8),
-                    'inward_total_volume': np.random.randint(100, 10000)
-                })
-        return pd.DataFrame(data)
+# Initialize session state
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+if "resume_data" not in st.session_state:
+    st.session_state.resume_data = None
+if "resume_analysis" not in st.session_state:
+    st.session_state.resume_analysis = None
+if "api_keys_set" not in st.session_state:
+    st.session_state.api_keys_set = False
 
-df = load_data()
-
-# ============================================================================
-# SIDEBAR NAVIGATION
-# ============================================================================
-st.sidebar.markdown("# 🏦 Banking Analytics")
-st.sidebar.markdown("### ML Project Dashboard")
-st.sidebar.markdown("---")
-
-page = st.sidebar.radio(
-    "📊 Navigate:",
-    ["🎯 Executive Summary", 
-     "📊 Dataset Overview", 
-     "🔥 Model Performance", 
-     "🌍 Economic Impact",
-     "🎨 Bank Segmentation",
-     "💡 Key Insights",
-     "🚀 Conclusions"],
-    label_visibility="collapsed"
-)
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📈 Project Stats")
-st.sidebar.metric("Total Models", "17")
-st.sidebar.metric("Best R² Score", "97.11%")
-st.sidebar.metric("Classification", "81.69%")
-st.sidebar.metric("Years Analyzed", "16.5")
-
-st.sidebar.markdown("---")
-st.sidebar.info("**Created by:** Your Name\n\n**Date:** January 2025\n\n**Institution:** Your College")
-
-# ============================================================================
-# PAGE 1: EXECUTIVE SUMMARY
-# ============================================================================
-if page == "🎯 Executive Summary":
-    st.markdown("# 🎯 Executive Summary")
-    st.markdown("## Banking Transaction Analytics & Prediction System")
+# Sidebar
+with st.sidebar:
+    st.markdown("### 🔑 API Configuration")
     
-    # Hero metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown("""
-            <div style='background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); 
-                        padding: 30px; border-radius: 15px; text-align: center; 
-                        box-shadow: 0 4px 12px rgba(59,130,246,0.3);'>
-                <h3 style='color: white; margin: 0; font-size: 16px;'>📊 Dataset</h3>
-                <h1 style='color: #fbbf24; margin: 15px 0; font-size: 42px;'>31,427</h1>
-                <p style='color: white; margin: 0; font-size: 14px;'>Records Analyzed</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-            <div style='background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); 
-                        padding: 30px; border-radius: 15px; text-align: center;
-                        box-shadow: 0 4px 12px rgba(139,92,246,0.3);'>
-                <h3 style='color: white; margin: 0; font-size: 16px;'>🏛️ Banks</h3>
-                <h1 style='color: #fbbf24; margin: 15px 0; font-size: 42px;'>317</h1>
-                <p style='color: white; margin: 0; font-size: 14px;'>Institutions Covered</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-            <div style='background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); 
-                        padding: 30px; border-radius: 15px; text-align: center;
-                        box-shadow: 0 4px 12px rgba(6,182,212,0.3);'>
-                <h3 style='color: white; margin: 0; font-size: 16px;'>🤖 ML Models</h3>
-                <h1 style='color: #fbbf24; margin: 15px 0; font-size: 42px;'>17</h1>
-                <p style='color: white; margin: 0; font-size: 14px;'>Trained & Evaluated</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown("""
-            <div style='background: linear-gradient(135deg, #10b981 0%, #059669 100%); 
-                        padding: 30px; border-radius: 15px; text-align: center;
-                        box-shadow: 0 4px 12px rgba(16,185,129,0.3);'>
-                <h3 style='color: white; margin: 0; font-size: 16px;'>🎯 Accuracy</h3>
-                <h1 style='color: #fbbf24; margin: 15px 0; font-size: 42px;'>97.11%</h1>
-                <p style='color: white; margin: 0; font-size: 14px;'>Best R² Score</p>
-            </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Project overview
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown("### 🎓 Project Overview")
-        st.markdown("""
-        <div style='background-color: white; padding: 25px; 
-                    border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                    border-left: 4px solid #3b82f6;'>
-            <p style='color: #334155; font-size: 16px; line-height: 1.8;'>
-            This comprehensive data science project analyzes <b>16.5 years</b> of banking 
-            transaction data from <b>317 Indian banks</b> (2008-2024). We employed 
-            <b>17 machine learning models</b> across classification, regression, clustering, 
-            and deep learning to predict transaction amounts, classify bank performance, 
-            segment institutions, and detect anomalies.
-            </p>
-            <p style='color: #334155; font-size: 16px; line-height: 1.8;'>
-            By integrating <b>economic indicators</b> (crude oil prices, GDP growth, interest 
-            rates, inflation) and analyzing <b>5 major economic events</b> (2008 Financial Crisis, 
-            COVID-19, etc.), we discovered strong correlations between macroeconomic factors 
-            and banking transaction patterns.
-            </p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("### 🏆 Key Achievements")
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                    border-left: 4px solid #10b981;'>
-            <ul style='color: #334155; font-size: 15px; line-height: 2;'>
-                <li>✅ <b>97.11%</b> prediction accuracy</li>
-                <li>✅ <b>81.69%</b> classification accuracy</li>
-                <li>✅ <b>4</b> distinct bank clusters</li>
-                <li>✅ <b>93%+</b> anomaly detection</li>
-                <li>✅ <b>70+</b> engineered features</li>
-                <li>✅ <b>Real-time</b> dashboard</li>
-                <li>✅ <b>Actionable</b> insights</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    
-    # Model categories
-    st.markdown("### 🤖 Machine Learning Approach")
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 10px; border-left: 5px solid #ef4444;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>📊 Classification</h4>
-            <p style='color: #64748b;'>7 Models</p>
-            <ul style='color: #475569; font-size: 13px;'>
-                <li>Random Forest</li>
-                <li>XGBoost</li>
-                <li>Gradient Boosting</li>
-                <li>SVM, KNN, DT</li>
-                <li>Logistic Regression</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 10px; border-left: 5px solid #10b981;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>📈 Regression</h4>
-            <p style='color: #64748b;'>5 Models</p>
-            <ul style='color: #475569; font-size: 13px;'>
-                <li>Random Forest ⭐</li>
-                <li>XGBoost</li>
-                <li>Ridge & Lasso</li>
-                <li>Linear Regression</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 10px; border-left: 5px solid #3b82f6;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>🎨 Clustering</h4>
-            <p style='color: #64748b;'>2 Models</p>
-            <ul style='color: #475569; font-size: 13px;'>
-                <li>K-Means</li>
-                <li>Hierarchical</li>
-                <li>Bank Segmentation</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 10px; border-left: 5px solid #8b5cf6;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>🧠 Deep Learning</h4>
-            <p style='color: #64748b;'>3 Models</p>
-            <ul style='color: #475569; font-size: 13px;'>
-                <li>Neural Networks</li>
-                <li>LSTM</li>
-                <li>Autoencoder</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-
-# ============================================================================
-# PAGE 2: DATASET OVERVIEW
-# ============================================================================
-elif page == "📊 Dataset Overview":
-    st.markdown("# 📊 Dataset Overview")
-    
-    # Dataset stats
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric(
-            "📅 Time Period",
-            "16.5 Years",
-            "2008-2024"
-        )
-    
-    with col2:
-        st.metric(
-            "🏛️ Total Banks",
-            f"{df['bank_name'].nunique()}",
-            "Indian Banking Sector"
-        )
-    
-    with col3:
-        st.metric(
-            "💰 Total Value",
-            f"₹{df['inward_total_amt'].sum()/1e12:.2f}T",
-            "Trillion Rupees"
-        )
+    if not st.session_state.api_keys_set:
+        groq_key = st.text_input("Groq API Key", type="password", key="groq_key_input")
+        gemini_key = st.text_input("Gemini API Key", type="password", key="gemini_key_input")
+        
+        if st.button("✅ Save API Keys"):
+            if groq_key and gemini_key:
+                try:
+                    # Initialize clients
+                    st.session_state.groq_client = Groq(api_key=groq_key)
+                    genai.configure(api_key=gemini_key)
+                    st.session_state.gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                    
+                    # Test connections
+                    test = st.session_state.groq_client.chat.completions.create(
+                        messages=[{"role": "user", "content": "Hi"}],
+                        model="llama-3.3-70b-versatile",
+                        max_tokens=5
+                    )
+                    
+                    st.session_state.api_keys_set = True
+                    st.success("✅ Connected!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+            else:
+                st.error("Enter both keys")
+    else:
+        st.success("✅ APIs Connected")
+        if st.button("🔄 Reset"):
+            st.session_state.api_keys_set = False
+            st.rerun()
     
     st.markdown("---")
-    
-    # Transaction trends
-    st.markdown("### 📈 Transaction Trends Over Time")
-    
-    monthly_data = df.groupby('month').agg({
-        'inward_total_amt': 'sum',
-        'outward_total_amt': 'sum'
-    }).reset_index()
-    
-    fig = go.Figure()
-    
-    fig.add_trace(go.Scatter(
-        x=monthly_data['month'],
-        y=monthly_data['inward_total_amt']/1e9,
-        name='Inward',
-        fill='tonexty',
-        line=dict(color='#10b981', width=3)
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=monthly_data['month'],
-        y=monthly_data['outward_total_amt']/1e9,
-        name='Outward',
-        line=dict(color='#ef4444', width=3)
-    ))
-    
-    fig.update_layout(
-        title="Banking Transaction Amounts (Billion ₹)",
-        xaxis_title="Year",
-        yaxis_title="Amount (Billion ₹)",
-        template='plotly_white',
-        height=500,
-        hovermode='x unified',
-        plot_bgcolor='white',
-        paper_bgcolor='white'
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Top banks
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 🏆 Top 10 Banks by Volume")
-        top_banks = df.groupby('bank_name')['inward_total_amt'].sum().nlargest(10).reset_index()
-        
-        fig = px.bar(
-            top_banks,
-            y='bank_name',
-            x='inward_total_amt',
-            orientation='h',
-            color='inward_total_amt',
-            color_continuous_scale='Blues'
-        )
-        fig.update_layout(
-            height=500, 
-            showlegend=False,
-            template='plotly_white',
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    with col2:
-        st.markdown("### 📊 Data Distribution")
-        
-        fig = go.Figure()
-        fig.add_trace(go.Histogram(
-            x=df['inward_total_volume'],
-            nbinsx=50,
-            marker_color='#3b82f6'
-        ))
-        fig.update_layout(
-            title="Transaction Volume Distribution",
-            xaxis_title="Volume",
-            yaxis_title="Frequency",
-            height=500,
-            template='plotly_white',
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        st.plotly_chart(fig, use_container_width=True)
+    page = st.radio("Navigation", ["🏠 Home", "📄 Resume Analysis"], label_visibility="collapsed")
 
-# ============================================================================
-# PAGE 3: MODEL PERFORMANCE
-# ============================================================================
-elif page == "🔥 Model Performance":
-    st.markdown("# 🔥 Machine Learning Model Performance")
-    
-    tabs = st.tabs(["🎯 Classification", "📈 Regression", "🧠 Deep Learning", "📊 Comparison"])
-    
-    # TAB 1: Classification
-    with tabs[0]:
-        st.markdown("### Bank Performance Classification")
-        
-        # Simulated results
-        classification_results = pd.DataFrame({
-            'Model': ['Random Forest', 'XGBoost', 'Gradient Boosting', 'SVM', 'KNN', 'Decision Tree', 'Logistic Regression'],
-            'Accuracy': [0.8169, 0.7827, 0.7825, 0.6249, 0.6021, 0.6634, 0.5810]
-        }).sort_values('Accuracy', ascending=False)
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            fig = go.Figure()
-            
-            colors = ['#10b981' if acc == classification_results['Accuracy'].max() 
-                     else '#3b82f6' for acc in classification_results['Accuracy']]
-            
-            fig.add_trace(go.Bar(
-                y=classification_results['Model'],
-                x=classification_results['Accuracy'],
-                orientation='h',
-                text=[f'{acc:.2%}' for acc in classification_results['Accuracy']],
-                textposition='outside',
-                marker=dict(color=colors)
-            ))
-            
-            fig.update_layout(
-                title="Classification Model Comparison",
-                xaxis_title="Accuracy",
-                height=500,
-                xaxis=dict(range=[0.5, 0.9]),
-                template='plotly_white',
-                plot_bgcolor='white',
-                paper_bgcolor='white'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.markdown("#### 🏆 Champion Model")
-            st.success(f"**{classification_results.iloc[0]['Model']}**")
-            st.metric("Accuracy", f"{classification_results.iloc[0]['Accuracy']:.2%}")
-            st.metric("vs Random Guess", f"{classification_results.iloc[0]['Accuracy']/0.333:.2f}x better")
-            
-            st.markdown("#### 📊 Task")
-            st.info("""
-            Predicting bank performance into 3 categories:
-            - **Low** Performance
-            - **Medium** Performance  
-            - **High** Performance
-            
-            Based on transaction patterns and economic indicators.
-            """)
-    
-    # TAB 2: Regression
-    with tabs[1]:
-        st.markdown("### Transaction Amount Prediction")
-        
-        regression_results = pd.DataFrame({
-            'Model': ['Random Forest', 'XGBoost', 'Ridge', 'Lasso', 'Linear Regression'],
-            'R² Score': [0.9711, 0.9574, 0.9494, 0.9492, 0.9492]
-        }).sort_values('R² Score', ascending=False)
-        
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            fig = go.Figure()
-            
-            colors = ['#fbbf24' if r2 == regression_results['R² Score'].max() 
-                     else '#3b82f6' for r2 in regression_results['R² Score']]
-            
-            fig.add_trace(go.Bar(
-                y=regression_results['Model'],
-                x=regression_results['R² Score'],
-                orientation='h',
-                text=[f'{r2:.2%}' for r2 in regression_results['R² Score']],
-                textposition='outside',
-                marker=dict(color=colors)
-            ))
-            
-            fig.update_layout(
-                title="Regression Model Comparison",
-                xaxis_title="R² Score",
-                height=400,
-                xaxis=dict(range=[0.9, 1.0]),
-                template='plotly_white',
-                plot_bgcolor='white',
-                paper_bgcolor='white'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with col2:
-            st.markdown("#### 🏆 Champion Model")
-            st.success(f"**{regression_results.iloc[0]['Model']}**")
-            st.metric("R² Score", f"{regression_results.iloc[0]['R² Score']:.2%}")
-            st.metric("Variance Explained", f"{regression_results.iloc[0]['R² Score']*100:.1f}%")
-            
-            st.markdown("#### 🎯 Achievement")
-            st.success("""
-            **97.11% R² Score** means the model explains 
-            97.11% of the variance in transaction amounts!
-            
-            Only 2.89% is unexplained - exceptional performance!
-            """)
-    
-    # TAB 3: Deep Learning
-    with tabs[2]:
-        st.markdown("### Deep Learning Models")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            st.markdown("""
-            <div style='background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); 
-                        padding: 30px; border-radius: 15px; text-align: center;
-                        box-shadow: 0 4px 12px rgba(59,130,246,0.3);'>
-                <h4 style='color: white;'>Neural Network</h4>
-                <h4 style='color: white;'>(Classification)</h4>
-                <h1 style='color: #fbbf24; margin: 20px 0;'>70.65%</h1>
-                <p style='color: white;'>Accuracy</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown("""
-            <div style='background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%); 
-                        padding: 30px; border-radius: 15px; text-align: center;
-                        box-shadow: 0 4px 12px rgba(139,92,246,0.3);'>
-                <h4 style='color: white;'>Neural Network</h4>
-                <h4 style='color: white;'>(Regression)</h4>
-                <h1 style='color: #fbbf24; margin: 20px 0;'>96.54%</h1>
-                <p style='color: white;'>R² Score</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            st.markdown("""
-            <div style='background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); 
-                        padding: 30px; border-radius: 15px; text-align: center;
-                        box-shadow: 0 4px 12px rgba(6,182,212,0.3);'>
-                <h4 style='color: white;'>Autoencoder</h4>
-                <h4 style='color: white;'>(Anomaly Detection)</h4>
-                <h1 style='color: #fbbf24; margin: 20px 0;'>93.92%</h1>
-                <p style='color: white;'>Accuracy</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        st.info("""
-        **💡 Deep Learning Insights:**
-        - Neural networks achieved competitive performance with traditional ML
-        - Autoencoder excelled at unsupervised anomaly detection
-        - Deep learning shows promise for complex pattern recognition in banking data
-        """)
-    
-    # TAB 4: Overall Comparison
-    with tabs[3]:
-        st.markdown("### Overall Model Comparison")
-        
-        all_models = pd.DataFrame({
-            'Model': ['RF Regression ⭐', 'NN Regression', 'XGBoost Regression', 
-                     'RF Classification', 'NN Classification', 'XGBoost Classification'],
-            'Score': [0.9711, 0.9654, 0.9574, 0.8169, 0.7065, 0.7827],
-            'Type': ['Regression', 'Regression', 'Regression', 
-                    'Classification', 'Classification', 'Classification']
-        })
-        
-        fig = px.bar(
-            all_models,
-            x='Model',
-            y='Score',
-            color='Type',
-            text='Score',
-            color_discrete_map={'Regression': '#10b981', 'Classification': '#3b82f6'}
-        )
-        
-        fig.update_traces(texttemplate='%{text:.2%}', textposition='outside')
-        fig.update_layout(
-            title="Top 6 Models Across All Categories",
-            yaxis_title="Performance Score",
-            height=600,
-            yaxis=dict(range=[0, 1]),
-            template='plotly_white',
-            plot_bgcolor='white',
-            paper_bgcolor='white'
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-
-# ============================================================================
-# PAGE 4: ECONOMIC IMPACT
-# ============================================================================
-elif page == "🌍 Economic Impact":
-    st.markdown("# 🌍 Economic Impact Analysis")
-    
-    st.markdown("### Major Economic Events & Banking Correlation")
-    
-    # Economic events timeline
-    events = pd.DataFrame({
-        'Event': ['2008 Financial Crisis', 'European Debt Crisis', 
-                 'Indian Demonetization', 'COVID-19 Pandemic', 'Russia-Ukraine War'],
-        'Start': ['2008-09', '2010-04', '2016-11', '2020-03', '2022-02'],
-        'End': ['2009-06', '2012-12', '2017-03', '2021-06', '2023-12'],
-        'Impact': ['High', 'Medium', 'High', 'Severe', 'Medium']
-    })
-    
-    st.dataframe(events, use_container_width=True, hide_index=True)
-    
-    st.markdown("---")
-    
-    # Economic indicators
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### 📊 Economic Indicators Tracked")
-        st.markdown("""
-        <div style='background-color: white; padding: 25px; 
-                    border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                    border-left: 4px solid #3b82f6;'>
-            <ul style='font-size: 16px; line-height: 2; color: #334155;'>
-                <li>🛢️ <b>Crude Oil Prices</b> - Energy market indicator</li>
-                <li>📈 <b>GDP Growth Rate</b> - Economic expansion measure</li>
-                <li>💰 <b>Interest Rates</b> - Monetary policy impact</li>
-                <li>💵 <b>Inflation Rate</b> - Price level changes</li>
-                <li>📉 <b>Market Volatility</b> - Risk sentiment</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("### 🔗 Key Correlations Found")
-        st.markdown("""
-        <div style='background-color: white; padding: 25px; 
-                    border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                    border-left: 4px solid #10b981;'>
-            <ul style='font-size: 16px; line-height: 2; color: #334155;'>
-                <li>✅ <b>GDP Growth ↔ Transactions:</b> Strong positive (0.62)</li>
-                <li>✅ <b>Oil Prices ↔ Banking:</b> Moderate positive (0.45)</li>
-                <li>⚠️ <b>Crisis Periods:</b> 15-25% decline in volume</li>
-                <li>📊 <b>Interest Rates:</b> Inverse relationship</li>
-                <li>🌍 <b>Global Events:</b> Immediate impact visible</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Crisis impact comparison
-    st.markdown("### 📉 Crisis Impact on Banking Transactions")
-    
-    crisis_data = pd.DataFrame({
-        'Period': ['Normal Period', '2008 Crisis', 'COVID-19', 'Ukraine War'],
-        'Avg Transaction (B₹)': [50, 42, 38, 47],
-        'Change (%)': [0, -16, -24, -6]
-    })
-    
-    fig = go.Figure()
-    
-    colors = ['#10b981', '#ef4444', '#ef4444', '#f59e0b']
-    
-    fig.add_trace(go.Bar(
-        x=crisis_data['Period'],
-        y=crisis_data['Avg Transaction (B₹)'],
-        text=crisis_data['Avg Transaction (B₹)'],
-        textposition='auto',
-        marker=dict(color=colors)
-    ))
-    
-    fig.update_layout(
-        title="Average Monthly Transaction Amount During Different Periods",
-        yaxis_title="Amount (Billion ₹)",
-        height=500,
-        template='plotly_white',
-        plot_bgcolor='white',
-        paper_bgcolor='white'
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-
-# ============================================================================
-# PAGE 5: BANK SEGMENTATION
-# ============================================================================
-elif page == "🎨 Bank Segmentation":
-    st.markdown("# 🎨 Bank Segmentation Analysis")
-    
-    st.markdown("### K-Means Clustering Results")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.metric("Optimal Clusters", "4", "K-Means")
-    
-    with col2:
-        st.metric("Silhouette Score", "0.467", "Good separation")
-    
-    with col3:
-        st.metric("Banks Segmented", "317", "All banks")
-    
-    st.markdown("---")
-    
-    # Cluster visualization (simulated)
-    np.random.seed(42)
-    n_banks = 317
-    cluster_data = pd.DataFrame({
-        'PC1': np.random.randn(n_banks),
-        'PC2': np.random.randn(n_banks),
-        'Cluster': np.random.choice(['Cluster 1', 'Cluster 2', 'Cluster 3', 'Cluster 4'], n_banks)
-    })
-    
-    fig = px.scatter(
-        cluster_data,
-        x='PC1',
-        y='PC2',
-        color='Cluster',
-        title='Bank Clusters (PCA Visualization)',
-        color_discrete_sequence=['#ef4444', '#06b6d4', '#3b82f6', '#f59e0b']
-    )
-    
-    fig.update_layout(
-        height=600,
-        template='plotly_white',
-        plot_bgcolor='white',
-        paper_bgcolor='white'
-    )
-    st.plotly_chart(fig, use_container_width=True)
-    
-    st.markdown("---")
-    
-    # Cluster characteristics
-    st.markdown("### 📊 Cluster Characteristics")
+# Main content
+if not st.session_state.api_keys_set:
+    st.markdown('<div class="main-header"><h1>🎯 AI Interview Prep & Resume Analyzer</h1><p>Enter API keys to start</p></div>', unsafe_allow_html=True)
     
     col1, col2 = st.columns(2)
-    
     with col1:
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 12px; border-left: 5px solid #ef4444;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>Cluster 1: Large National Banks</h4>
-            <ul style='color: #475569;'>
-                <li>High transaction volumes</li>
-                <li>Extensive branch network</li>
-                <li>Diverse customer base</li>
-                <li>80 banks in cluster</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 12px; border-left: 5px solid #06b6d4;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>Cluster 2: Regional Banks</h4>
-            <ul style='color: #475569;'>
-                <li>Medium transaction volumes</li>
-                <li>Regional focus</li>
-                <li>Growing customer base</li>
-                <li>95 banks in cluster</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
+        st.markdown("### 🔑 Groq API\n1. Visit [console.groq.com](https://console.groq.com/keys)\n2. Create API Key\n3. Paste in sidebar")
     with col2:
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 12px; border-left: 5px solid #3b82f6;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>Cluster 3: Specialized Banks</h4>
-            <ul style='color: #475569;'>
-                <li>Niche markets</li>
-                <li>Specific services</li>
-                <li>Targeted customers</li>
-                <li>72 banks in cluster</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("<br>", unsafe_allow_html=True)
-        
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 12px; border-left: 5px solid #f59e0b;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>Cluster 4: Small/Co-operative Banks</h4>
-            <ul style='color: #475569;'>
-                <li>Lower transaction volumes</li>
-                <li>Local community focus</li>
-                <li>Limited geographic reach</li>
-                <li>70 banks in cluster</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
+        st.markdown("### 🔑 Gemini API\n1. Visit [aistudio.google.com](https://aistudio.google.com/app/apikey)\n2. Create API Key\n3. Paste in sidebar")
 
-# ============================================================================
-# PAGE 6: KEY INSIGHTS
-# ============================================================================
-elif page == "💡 Key Insights":
-    st.markdown("# 💡 Key Insights & Findings")
+else:
+    if page == "🏠 Home":
+        st.markdown('<div class="main-header"><h1>🎯 AI Interview Prep</h1><p>Your AI career assistant</p></div>', unsafe_allow_html=True)
+        
+        if st.session_state.resume_data:
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.markdown(f'<div class="metric-card"><div style="font-size:2rem;font-weight:700;color:#667eea">{len(st.session_state.resume_data.get("skills", []))}</div><div>Skills Found</div></div>', unsafe_allow_html=True)
+            with col2:
+                st.markdown(f'<div class="metric-card"><div style="font-size:2rem;font-weight:700;color:#667eea">{len(st.session_state.resume_data.get("experience", []))}</div><div>Experience</div></div>', unsafe_allow_html=True)
+            with col3:
+                if st.session_state.resume_analysis:
+                    score = st.session_state.resume_analysis['ats_score']
+                    st.markdown(f'<div class="metric-card"><div style="font-size:2rem;font-weight:700;color:#667eea">{score}</div><div>ATS Score</div></div>', unsafe_allow_html=True)
+        else:
+            st.info("👆 Upload resume in sidebar")
     
-    tabs = st.tabs(["🏦 For Banks", "📋 For Regulators", "💰 For Investors"])
-    
-    with tabs[0]:
-        st.markdown("### Recommendations for Banks")
+    elif page == "📄 Resume Analysis":
+        st.markdown('<div class="main-header"><h1>📄 Resume Analysis</h1><p>Upload PDF for analysis</p></div>', unsafe_allow_html=True)
         
-        col1, col2 = st.columns(2)
+        uploaded_file = st.file_uploader("Upload Resume (PDF)", type=['pdf'])
         
-        with col1:
-            st.markdown("""
-            <div style='background-color: white; padding: 25px; 
-                        border-radius: 12px; border-left: 5px solid #10b981;
-                        box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-                <h4 style='color: #1e293b;'>📈 Predictive Analytics</h4>
-                <p style='color: #475569; line-height: 1.8;'>
-                Use our 97% accurate models for:
-                <ul style='color: #475569;'>
-                    <li>Liquidity forecasting</li>
-                    <li>Cash flow optimization</li>
-                    <li>Resource allocation</li>
-                    <li>Strategic planning</li>
-                </ul>
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
+        if uploaded_file and st.button("🔍 Analyze", type="primary"):
+            with st.spinner("Analyzing..."):
+                text = extract_text_from_pdf(uploaded_file)
+                if text:
+                    resume_data = structure_resume_data(text)
+                    st.session_state.resume_data = resume_data
+                    
+                    analysis = complete_resume_analysis(
+                        resume_data, 
+                        st.session_state.gemini_model,
+                        st.session_state.groq_client
+                    )
+                    st.session_state.resume_analysis = analysis
+                    st.success("✅ Complete!")
+                    st.rerun()
+        
+        if st.session_state.resume_analysis:
+            st.markdown("## 📊 ATS Score")
             
-            st.markdown("<br>", unsafe_allow_html=True)
+            col1, col2, col3 = st.columns([2,1,1])
+            with col1:
+                score = st.session_state.resume_analysis['ats_score']
+                st.markdown(f'<div class="score-card"><p class="score-value">{score}</p><p>ATS Score / 100</p></div>', unsafe_allow_html=True)
+            with col2:
+                grade = st.session_state.resume_analysis['ats_grade']
+                st.markdown(f'<div class="metric-card"><div style="font-size:2rem;font-weight:700;color:#667eea">{grade}</div><div>Grade</div></div>', unsafe_allow_html=True)
+            with col3:
+                badge = format_score_badge(score)
+                st.markdown(f'<div class="info-box success"><h3 style="margin:0">{badge}</h3></div>', unsafe_allow_html=True)
             
-            st.markdown("""
-            <div style='background-color: white; padding: 25px; 
-                        border-radius: 12px; border-left: 5px solid #3b82f6;
-                        box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-                <h4 style='color: #1e293b;'>🔍 Risk Management</h4>
-                <p style='color: #475569; line-height: 1.8;'>
-                Implement:
-                <ul style='color: #475569;'>
-                    <li>Anomaly detection (93% accuracy)</li>
-                    <li>Fraud prevention systems</li>
-                    <li>Real-time monitoring</li>
-                    <li>Early warning indicators</li>
-                </ul>
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown("""
-            <div style='background-color: white; padding: 25px; 
-                        border-radius: 12px; border-left: 5px solid #8b5cf6;
-                        box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-                <h4 style='color: #1e293b;'>👥 Customer Segmentation</h4>
-                <p style='color: #475569; line-height: 1.8;'>
-                Leverage clustering for:
-                <ul style='color: #475569;'>
-                    <li>Personalized services</li>
-                    <li>Targeted marketing</li>
-                    <li>Product development</li>
-                    <li>Customer retention</li>
-                </ul>
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("### 📋 Feedback")
+            for feedback in st.session_state.resume_analysis['ats_feedback']:
+                if '✅' in feedback:
+                    st.markdown(f'<div class="info-box success">{feedback}</div>', unsafe_allow_html=True)
+                elif '⚠️' in feedback:
+                    st.markdown(f'<div class="info-box warning">{feedback}</div>', unsafe_allow_html=True)
+                else:
+                    st.markdown(f'<div class="info-box error">{feedback}</div>', unsafe_allow_html=True)
             
-            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown("## 🤖 AI Analysis")
+            with st.expander("View Details", expanded=True):
+                st.markdown(st.session_state.resume_analysis['gemini_analysis'])
             
-            st.markdown("""
-            <div style='background-color: white; padding: 25px; 
-                        border-radius: 12px; border-left: 5px solid #f59e0b;
-                        box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-                <h4 style='color: #1e293b;'>🌍 Economic Monitoring</h4>
-                <p style='color: #475569; line-height: 1.8;'>
-                Track indicators:
-                <ul style='color: #475569;'>
-                    <li>Oil prices & GDP trends</li>
-                    <li>Interest rate changes</li>
-                    <li>Crisis preparation</li>
-                    <li>Scenario planning</li>
-                </ul>
-                </p>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    with tabs[1]:
-        st.markdown("### Recommendations for Regulators")
-        
-        st.success("""
-        **🎯 Systemic Risk Monitoring**
-        - Use clustering to identify vulnerable bank groups
-        - Monitor inter-bank dependencies
-        - Track concentration risks
-        - Early warning systems based on transaction patterns
-        """)
-        
-        st.info("""
-        **📊 Policy Impact Assessment**
-        - Measure policy effects on different bank segments
-        - Use predictions for stress testing
-        - Evaluate regulatory changes before implementation
-        - Data-driven decision making
-        """)
-        
-        st.warning("""
-        **🔒 Financial Stability**
-        - Monitor transaction anomalies across sector
-        - Identify emerging risks early
-        - Crisis preparedness planning
-        - Real-time dashboard for supervisors
-        """)
-    
-    with tabs[2]:
-        st.markdown("### Recommendations for Investors")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("#### 📈 Investment Strategies")
-            st.markdown("""
-            <div style='background-color: white; padding: 25px; 
-                        border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                        border-left: 4px solid #3b82f6;'>
-                <ol style='line-height: 2; color: #334155;'>
-                    <li><b>Cluster-Based Diversification</b>
-                        <ul style='color: #475569;'>
-                            <li>Invest across all 4 clusters</li>
-                            <li>Balance risk-return profile</li>
-                        </ul>
-                    </li>
-                    <li><b>Performance Prediction</b>
-                        <ul style='color: #475569;'>
-                            <li>Use ML models for entry/exit timing</li>
-                            <li>81% accuracy in performance classification</li>
-                        </ul>
-                    </li>
-                    <li><b>Economic Monitoring</b>
-                        <ul style='color: #475569;'>
-                            <li>Watch GDP and oil price trends</li>
-                            <li>Adjust positions during crises</li>
-                        </ul>
-                    </li>
-                </ol>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown("#### 💰 Risk Management")
-            st.markdown("""
-            <div style='background-color: white; padding: 25px; 
-                        border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                        border-left: 4px solid #10b981;'>
-                <ul style='line-height: 2; color: #334155;'>
-                    <li>🎯 <b>Focus on Cluster 1 & 2 banks</b> for stability</li>
-                    <li>📊 <b>Monitor transaction anomalies</b> as red flags</li>
-                    <li>🌍 <b>Consider economic indicators</b> in decisions</li>
-                    <li>📈 <b>Use predictions</b> for timing strategies</li>
-                    <li>⚖️ <b>Balance</b> between growth and value banks</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown("## 💡 Suggestions")
+            for i, suggestion in enumerate(st.session_state.resume_analysis['improvement_suggestions'], 1):
+                st.markdown(f"{i}. {suggestion}")
+            
+            st.markdown("## 🎯 Skills")
+            skills = st.session_state.resume_data['skills']
+            skills_html = '<div>'
+            for skill in skills:
+                skills_html += f'<span class="badge badge-info">{skill}</span>'
+            skills_html += '</div>'
+            st.markdown(skills_html, unsafe_allow_html=True)
 
-# ============================================================================
-# PAGE 7: CONCLUSIONS
-# ============================================================================
-elif page == "🚀 Conclusions":
-    st.markdown("# 🚀 Conclusions & Future Work")
-    
-    st.markdown("### 🎊 Project Summary")
-    
-    st.success("""
-    This comprehensive data science project successfully demonstrated the power of 
-    machine learning in banking analytics. By analyzing 16.5 years of data from 
-    317 banks and integrating economic indicators, we achieved:
-    
-    - **97.11% R² accuracy** in transaction prediction
-    - **81.69% accuracy** in performance classification
-    - **4 distinct bank segments** for strategic planning
-    - **93%+ accuracy** in anomaly detection
-    - **Strong economic correlations** providing actionable insights
-    """)
-    
-    st.markdown("---")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("### ✅ Strengths")
-        st.markdown("""
-        <div style='background-color: white; padding: 25px; 
-                    border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                    border-left: 4px solid #10b981;'>
-            <ul style='color: #334155; line-height: 2;'>
-                <li>Comprehensive analysis (17 models)</li>
-                <li>Excellent predictive accuracy</li>
-                <li>Economic integration</li>
-                <li>Multiple ML paradigms</li>
-                <li>Production-ready dashboard</li>
-                <li>Actionable business insights</li>
-                <li>Scalable architecture</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("### ⚠️ Limitations")
-        st.markdown("""
-        <div style='background-color: white; padding: 25px; 
-                    border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-                    border-left: 4px solid #ef4444;'>
-            <ul style='color: #334155; line-height: 2;'>
-                <li>LSTM underperformed (sequencing issues)</li>
-                <li>Economic data partially simulated</li>
-                <li>Limited to Indian banking sector</li>
-                <li>SVR struggled with scale</li>
-                <li>No real-time data integration</li>
-                <li>Single country focus</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    st.markdown("### 🔮 Future Enhancements")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 12px; min-height: 250px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-                    border-left: 4px solid #3b82f6;'>
-            <h4 style='color: #1e293b;'>📡 Real-Time Integration</h4>
-            <ul style='color: #475569; font-size: 14px;'>
-                <li>Live data APIs</li>
-                <li>Streaming predictions</li>
-                <li>Auto-retraining pipeline</li>
-                <li>Real-time dashboard updates</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 12px; min-height: 250px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-                    border-left: 4px solid #8b5cf6;'>
-            <h4 style='color: #1e293b;'>🧠 Advanced ML</h4>
-            <ul style='color: #475569; font-size: 14px;'>
-                <li>Graph Neural Networks</li>
-                <li>Transformer models</li>
-                <li>Explainable AI (SHAP)</li>
-                <li>Reinforcement Learning</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-        <div style='background-color: white; padding: 20px; 
-                    border-radius: 12px; min-height: 250px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-                    border-left: 4px solid #10b981;'>
-            <h4 style='color: #1e293b;'>🌍 Expanded Scope</h4>
-            <ul style='color: #475569; font-size: 14px;'>
-                <li>Global banking systems</li>
-                <li>Cryptocurrency integration</li>
-                <li>ESG factors</li>
-                <li>Sentiment analysis</li>
-            </ul>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    st.markdown("### 🏆 Key Takeaways")
-    
-    st.info("""
-    **For Data Science Students:**
-    - End-to-end ML pipeline development
-    - Proper handling of data leakage
-    - Feature engineering importance
-    - Model selection and comparison
-    - Production deployment skills
-    
-    **For Banking Professionals:**
-    - ML can achieve 97%+ accuracy in predictions
-    - Economic indicators significantly impact banking
-    - Real-time monitoring is feasible and valuable
-    - Different bank segments need different strategies
-    
-    **For Everyone:**
-    - Data-driven decision making is powerful
-    - Machine learning has real-world business value
-    - Technology can transform traditional industries
-    - Continuous learning and improvement is essential
-    """)
-    
-    st.markdown("---")
-    
-    st.markdown("### 📞 Contact & Resources")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("""
-        <div style='text-align: center; background-color: white; 
-                    padding: 20px; border-radius: 12px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>📧 Contact</h4>
-            <p style='color: #475569;'>your.email@example.com</p>
-            <p style='color: #475569;'>LinkedIn | GitHub</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown("""
-        <div style='text-align: center; background-color: white; 
-                    padding: 20px; border-radius: 12px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>💻 Repository</h4>
-            <p style='color: #475569;'>github.com/yourname/</p>
-            <p style='color: #475569;'>banking-analytics</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown("""
-        <div style='text-align: center; background-color: white; 
-                    padding: 20px; border-radius: 12px;
-                    box-shadow: 0 2px 8px rgba(0,0,0,0.08);'>
-            <h4 style='color: #1e293b;'>🌐 Dashboard</h4>
-            <p style='color: #475569;'>Live Demo</p>
-            <p style='color: #475569;'>streamlit.app/yourapp</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("<br><br>", unsafe_allow_html=True)
-    
-    st.markdown("""
-    <div style='text-align: center; padding: 40px; background-color: white;
-                border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);'>
-        <h2 style='color: #1e293b;'>🎉 Thank You for Your Attention!</h2>
-        <h3 style='color: #475569;'>Questions & Discussion Welcome</h3>
-    </div>
-    """, unsafe_allow_html=True)
-
-# ============================================================================
-# FOOTER
-# ============================================================================
 st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #64748b; padding: 20px;'>
-    <p>🏦 Banking Analytics & Prediction System | Machine Learning Project 2024-25</p>
-    <p>Built with ❤️ using Streamlit, Plotly, and Python</p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown('<div style="text-align:center;color:#6b7280;padding:1rem"><p>🎯 AI Interview Prep v1.0</p></div>', unsafe_allow_html=True)
