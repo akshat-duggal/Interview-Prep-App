@@ -11,53 +11,6 @@ import json
 import re
 from typing import Dict, List, Optional
 
-"""
-Quick fix for Groq API initialization error
-"""
-
-# Fix 1: Ensure you have the correct Groq version
-import subprocess
-import sys
-
-print("🔧 Fixing Groq API initialization issue...")
-print("-" * 50)
-
-# Step 1: Uninstall any existing groq package
-print("Step 1: Uninstalling existing groq package...")
-subprocess.run([sys.executable, "-m", "pip", "uninstall", "groq", "-y"], capture_output=True)
-
-# Step 2: Install the correct version
-print("Step 2: Installing correct groq version...")
-subprocess.run([sys.executable, "-m", "pip", "install", "groq==0.4.2"], capture_output=True)
-
-print("✅ Groq package reinstalled successfully!")
-print("-" * 50)
-
-# Step 3: Test the installation
-print("Step 3: Testing Groq import...")
-try:
-    from groq import Groq
-    print("✅ Groq imported successfully!")
-    
-    # Try to initialize with a dummy key
-    try:
-        client = Groq(api_key="test-key-123")
-        print("✅ Groq client can be initialized!")
-    except Exception as e:
-        if "proxies" in str(e):
-            print("❌ Still seeing proxies error")
-        else:
-            print("✅ No 'proxies' error - initialization works!")
-            
-except ImportError as e:
-    print(f"❌ Failed to import Groq: {e}")
-
-print("-" * 50)
-print("\n📝 Next steps:")
-print("1. Run this script: python fix_groq.py")
-print("2. Restart your Streamlit app")
-print("3. The error should be resolved!")
-
 # ============================================================================
 # GROQ CLIENT HELPER
 # ============================================================================
