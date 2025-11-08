@@ -385,6 +385,9 @@ Provide:
 
 def generate_tailored_cover_letter(resume_data: Dict, job_description: str, groq_client) -> str:
     """Generate cover letter with Groq."""
+    if not groq_client:
+        return "Cover letter generation requires Groq API key. Please add it in the sidebar to enable this feature."
+    
     prompt = f"""Write a professional cover letter.
 
 SKILLS: {', '.join(resume_data['skills'][:15])}
@@ -431,6 +434,9 @@ def complete_job_match_analysis(resume_data: Dict, job_description: str) -> Dict
 # Interview Question Generation (from Cell 7)
 def generate_technical_questions(resume_data: Dict, difficulty: str, num_questions: int, groq_client) -> List[Dict]:
     """Generate technical questions."""
+    if not groq_client:
+        return []
+    
     skills_list = ', '.join(resume_data['skills'][:10])
     
     prompt = f"""Generate {num_questions} {difficulty} technical interview questions.
@@ -472,6 +478,9 @@ Continue for all questions."""
 
 def generate_behavioral_questions(num_questions: int, groq_client) -> List[Dict]:
     """Generate behavioral questions."""
+    if not groq_client:
+        return []
+    
     prompt = f"""Generate {num_questions} behavioral interview questions using STAR method.
 
 Format:
@@ -508,6 +517,9 @@ Continue for all questions."""
 
 def generate_situational_questions(resume_data: Dict, num_questions: int, groq_client) -> List[Dict]:
     """Generate situational questions."""
+    if not groq_client:
+        return []
+    
     prompt = f"""Generate {num_questions} situational questions.
 
 BACKGROUND:
@@ -546,6 +558,9 @@ Evaluation: [Criteria]"""
 
 def generate_resume_based_questions(resume_data: Dict, num_questions: int, groq_client) -> List[Dict]:
     """Generate resume-based questions."""
+    if not groq_client:
+        return []
+    
     skills = ', '.join(resume_data['skills'][:10])
     exp_summary = ""
     for exp in resume_data['experience'][:3]:
@@ -617,6 +632,9 @@ def generate_complete_interview_set(resume_data: Dict, interview_type: str, diff
 # Answer Evaluation (from Cell 8)
 def evaluate_answer_with_groq(question: str, answer: str, question_type: str, groq_client) -> Dict:
     """Evaluate interview answer."""
+    if not groq_client:
+        return {'success': False, 'scores': {'total': 0, 'percentage': 0}, 'full_evaluation': "Groq API required for evaluation", 'grade': 'N/A'}
+    
     prompt = f"""Evaluate this answer.
 
 TYPE: {question_type}
@@ -783,6 +801,9 @@ def conduct_mock_interview(resume_data: Dict, questions: List[Dict], answers: Li
 
 def generate_improvement_plan(interview_results: Dict) -> str:
     """Generate improvement plan."""
+    if not st.session_state.groq_client:
+        return "Improvement plan generation requires Groq API key. Please add it in the sidebar to enable this feature."
+    
     weaknesses = ', '.join(interview_results['weaknesses']) if interview_results['weaknesses'] else "None"
     strengths = ', '.join(interview_results['strengths']) if interview_results['strengths'] else "Various"
     
@@ -1277,36 +1298,49 @@ with st.sidebar:
     st.markdown("### 🔑 API Configuration")
     
     if not st.session_state.api_keys_set:
-        st.info("Please enter your API keys to get started")
+        st.info("Please enter your Gemini API key (required). Groq API key is optional but enables additional features.")
         
-        groq_key = st.text_input("Groq API Key", type="password", help="Get from console.groq.com/keys")
-        gemini_key = st.text_input("Gemini API Key", type="password", help="Get from aistudio.google.com/app/apikey")
+        groq_key = st.text_input("Groq API Key (Optional)", type="password", help="Optional: For interview questions & evaluation. Get from console.groq.com/keys")
+        gemini_key = st.text_input("Gemini API Key (Required)", type="password", help="Required: For resume analysis. Get from aistudio.google.com/app/apikey")
         
         if st.button("✅ Save API Keys"):
-            if groq_key and gemini_key:
+            if gemini_key:
                 try:
-                    # Test Groq
-                    st.session_state.groq_client = Groq(api_key=groq_key)
-                    test = st.session_state.groq_client.chat.completions.create(
-                        messages=[{"role": "user", "content": "Hi"}],
-                        model="llama-3.3-70b-versatile",
-                        max_tokens=5
-                    )
-                    
-                    # Test Gemini
+                    # Test Gemini (required)
                     genai.configure(api_key=gemini_key)
                     st.session_state.gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
-                    test2 = st.session_state.gemini_model.generate_content("Hi")
+                    test_gemini = st.session_state.gemini_model.generate_content("Hi")
+                    
+                    # Test Groq (optional)
+                    if groq_key:
+                        try:
+                            st.session_state.groq_client = Groq(api_key=groq_key)
+                            test_groq = st.session_state.groq_client.chat.completions.create(
+                                messages=[{"role": "user", "content": "Hi"}],
+                                model="llama-3.3-70b-versatile",
+                                max_tokens=5
+                            )
+                            st.success("✅ Both API keys validated!")
+                        except Exception as e:
+                            st.warning(f"⚠️ Groq API failed: {str(e)}. Continuing with Gemini only (some features disabled).")
+                            st.session_state.groq_client = None
+                    else:
+                        st.info("ℹ️ Groq API not provided. Mock interview features will be limited.")
+                        st.session_state.groq_client = None
                     
                     st.session_state.api_keys_set = True
-                    st.success("✅ API keys validated!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ API validation failed: {str(e)}")
+                    st.error(f"❌ Gemini API validation failed: {str(e)}")
             else:
-                st.error("Please enter both API keys")
+                st.error("❌ Gemini API key is required!")
     else:
         st.success("✅ API Keys Configured")
+        if st.session_state.groq_client:
+            st.info("🔹 Groq: Enabled")
+        else:
+            st.warning("⚠️ Groq: Disabled (some features limited)")
+        
         if st.button("🔄 Reset API Keys"):
             st.session_state.api_keys_set = False
             st.rerun()
@@ -1341,26 +1375,30 @@ if not st.session_state.api_keys_set:
     """, unsafe_allow_html=True)
     
     st.markdown("## 👈 Get Started")
-    st.info("Enter your API keys in the sidebar to begin!")
+    st.info("Enter your Gemini API key (required) in the sidebar to begin! Groq API key is optional.")
     
     col1, col2 = st.columns(2)
     
     with col1:
         st.markdown("""
-            ### 🔑 Get Groq API Key
-            1. Visit [console.groq.com/keys](https://console.groq.com/keys)
-            2. Sign up/Login with Google
-            3. Click 'Create API Key'
-            4. Copy and paste in sidebar
-        """)
-    
-    with col2:
-        st.markdown("""
-            ### 🔑 Get Gemini API Key
+            ### 🔑 Get Gemini API Key (Required)
             1. Visit [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
             2. Sign in with Google
             3. Click 'Create API Key'
             4. Copy and paste in sidebar
+            
+            **Used for:** Resume analysis, job matching
+        """)
+    
+    with col2:
+        st.markdown("""
+            ### 🔑 Get Groq API Key (Optional)
+            1. Visit [console.groq.com/keys](https://console.groq.com/keys)
+            2. Sign up/Login with Google
+            3. Click 'Create API Key'
+            4. Copy and paste in sidebar
+            
+            **Used for:** Interview questions, cover letters, evaluation
         """)
     
     st.markdown("---")
@@ -1388,7 +1426,7 @@ if not st.session_state.api_keys_set:
         st.markdown("""
             <div class="info-box success">
                 <h3>🎤 Mock Interviews</h3>
-                <p>Practice with AI-generated questions and get real-time feedback</p>
+                <p>Practice with AI-generated questions and get real-time feedback (requires Groq)</p>
             </div>
         """, unsafe_allow_html=True)
 
@@ -1418,9 +1456,11 @@ else:
                 st.rerun()
         
         with col3:
-            if st.button("🎤 Start Interview", use_container_width=True):
+            if st.button("🎤 Start Interview", use_container_width=True, disabled=not st.session_state.groq_client):
                 st.session_state.page = "🎤 Mock Interview"
                 st.rerun()
+            if not st.session_state.groq_client:
+                st.caption("⚠️ Requires Groq API")
         
         st.markdown("---")
         
@@ -1708,16 +1748,20 @@ else:
                 st.markdown("---")
                 st.markdown("## ✍️ AI-Generated Cover Letter")
                 
+                if not st.session_state.groq_client:
+                    st.warning("⚠️ Cover letter generation requires Groq API key. Please add it in the sidebar.")
+                
                 cover_letter = st.session_state.job_match_analysis['cover_letter']
                 st.text_area("Your Cover Letter", cover_letter, height=400)
                 
                 # Download button
-                st.download_button(
-                    label="📥 Download Cover Letter",
-                    data=cover_letter,
-                    file_name="cover_letter.txt",
-                    mime="text/plain"
-                )
+                if st.session_state.groq_client:
+                    st.download_button(
+                        label="📥 Download Cover Letter",
+                        data=cover_letter,
+                        file_name="cover_letter.txt",
+                        mime="text/plain"
+                    )
     
     elif page == "🎤 Mock Interview":
         st.markdown("""
@@ -1727,7 +1771,20 @@ else:
             </div>
         """, unsafe_allow_html=True)
         
-        if not st.session_state.resume_data:
+        if not st.session_state.groq_client:
+            st.error("⚠️ Mock Interview requires Groq API key. Please add it in the sidebar to enable this feature.")
+            st.info("💡 Groq API enables: Question generation, answer evaluation, and improvement plans")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown("""
+                    ### 🔑 Get Groq API Key
+                    1. Visit [console.groq.com/keys](https://console.groq.com/keys)
+                    2. Sign up/Login
+                    3. Create API Key
+                    4. Add in sidebar
+                """)
+        elif not st.session_state.resume_data:
             st.warning("⚠️ Please upload and analyze your resume first!")
             if st.button("📄 Go to Resume Analysis"):
                 st.session_state.page = "📄 Resume Analysis"
@@ -1761,15 +1818,19 @@ else:
                             interview_type,
                             difficulty
                         )
-                        st.session_state.current_interview = {
-                            'questions': interview_set['questions'],
-                            'answers': [],
-                            'current_question': 0,
-                            'interview_type': interview_type,
-                            'difficulty': difficulty
-                        }
-                        st.success(f"✅ Generated {len(interview_set['questions'])} questions!")
-                        st.rerun()
+                        
+                        if not interview_set['questions']:
+                            st.error("❌ Failed to generate questions. Please try again.")
+                        else:
+                            st.session_state.current_interview = {
+                                'questions': interview_set['questions'],
+                                'answers': [],
+                                'current_question': 0,
+                                'interview_type': interview_type,
+                                'difficulty': difficulty
+                            }
+                            st.success(f"✅ Generated {len(interview_set['questions'])} questions!")
+                            st.rerun()
                     except Exception as e:
                         st.error(f"❌ Question generation failed: {str(e)}")
             
@@ -1957,9 +2018,12 @@ else:
         if not SESSION_DATA['interview_history']:
             st.info("🎤 Complete some mock interviews to see your performance dashboard!")
             
-            if st.button("🎯 Start Your First Interview"):
-                st.session_state.page = "🎤 Mock Interview"
-                st.rerun()
+            if st.session_state.groq_client:
+                if st.button("🎯 Start Your First Interview"):
+                    st.session_state.page = "🎤 Mock Interview"
+                    st.rerun()
+            else:
+                st.warning("⚠️ Mock interviews require Groq API key. Please add it in the sidebar.")
         else:
             # Overall Statistics
             st.markdown("## 📈 Overall Statistics")
