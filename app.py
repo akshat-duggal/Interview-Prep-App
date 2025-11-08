@@ -12,24 +12,6 @@ import re
 from typing import Dict, List, Optional
 
 # ============================================================================
-# GROQ CLIENT HELPER
-# ============================================================================
-
-def get_groq_client():
-    """Get or create Groq client with lazy initialization."""
-    if 'groq_client' not in st.session_state or st.session_state.groq_client is None:
-        if 'groq_api_key' in st.session_state and st.session_state.groq_api_key:
-            try:
-                # FIXED: Direct initialization with api_key
-                st.session_state.groq_client = Groq(
-                    api_key=st.session_state.groq_api_key
-                )
-            except Exception as e:
-                st.error(f"Failed to initialize Groq client: {str(e)}")
-                return None
-    return st.session_state.groq_client
-
-# ============================================================================
 # HELPER FUNCTIONS FROM PREVIOUS CELLS
 # ============================================================================
 
@@ -401,7 +383,7 @@ Provide:
     except:
         return "Report unavailable."
 
-def generate_tailored_cover_letter(resume_data: Dict, job_description: str) -> str:
+def generate_tailored_cover_letter(resume_data: Dict, job_description: str, groq_client) -> str:
     """Generate cover letter with Groq."""
     prompt = f"""Write a professional cover letter.
 
@@ -418,7 +400,7 @@ Write 250-300 words covering:
 4. Call to action"""
 
     try:
-        response = get_groq_client().chat.completions.create(
+        response = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=500,
@@ -433,7 +415,7 @@ def complete_job_match_analysis(resume_data: Dict, job_description: str) -> Dict
     job_req = extract_job_requirements(job_description)
     match_score = calculate_match_score(resume_data, job_req)
     gemini_report = generate_job_match_report_with_gemini(resume_data, job_description, match_score, st.session_state.gemini_model)
-    cover_letter = generate_tailored_cover_letter(resume_data, job_description)
+    cover_letter = generate_tailored_cover_letter(resume_data, job_description, st.session_state.groq_client)
     
     return {
         'match_score': match_score['total_score'],
@@ -447,7 +429,7 @@ def complete_job_match_analysis(resume_data: Dict, job_description: str) -> Dict
     }
 
 # Interview Question Generation (from Cell 7)
-def generate_technical_questions(resume_data: Dict, difficulty: str, num_questions: int) -> List[Dict]:
+def generate_technical_questions(resume_data: Dict, difficulty: str, num_questions: int, groq_client) -> List[Dict]:
     """Generate technical questions."""
     skills_list = ', '.join(resume_data['skills'][:10])
     
@@ -463,7 +445,7 @@ Follow-up: [Follow-up]
 Continue for all questions."""
 
     try:
-        response = get_groq_client().chat.completions.create(
+        response = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=1500,
@@ -488,7 +470,7 @@ Continue for all questions."""
     except:
         return []
 
-def generate_behavioral_questions(num_questions: int) -> List[Dict]:
+def generate_behavioral_questions(num_questions: int, groq_client) -> List[Dict]:
     """Generate behavioral questions."""
     prompt = f"""Generate {num_questions} behavioral interview questions using STAR method.
 
@@ -499,7 +481,7 @@ What to listen for: [Points]
 Continue for all questions."""
 
     try:
-        response = get_groq_client().chat.completions.create(
+        response = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=1000,
@@ -524,7 +506,7 @@ Continue for all questions."""
     except:
         return []
 
-def generate_situational_questions(resume_data: Dict, num_questions: int) -> List[Dict]:
+def generate_situational_questions(resume_data: Dict, num_questions: int, groq_client) -> List[Dict]:
     """Generate situational questions."""
     prompt = f"""Generate {num_questions} situational questions.
 
@@ -537,7 +519,7 @@ Q1: [Scenario and question]
 Evaluation: [Criteria]"""
 
     try:
-        response = get_groq_client().chat.completions.create(
+        response = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=1000,
@@ -562,7 +544,7 @@ Evaluation: [Criteria]"""
     except:
         return []
 
-def generate_resume_based_questions(resume_data: Dict, num_questions: int) -> List[Dict]:
+def generate_resume_based_questions(resume_data: Dict, num_questions: int, groq_client) -> List[Dict]:
     """Generate resume-based questions."""
     skills = ', '.join(resume_data['skills'][:10])
     exp_summary = ""
@@ -580,7 +562,7 @@ Q1: [Question about resume]
 Why: [Reasoning]"""
 
     try:
-        response = get_groq_client().chat.completions.create(
+        response = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=1000,
@@ -610,20 +592,20 @@ def generate_complete_interview_set(resume_data: Dict, interview_type: str, diff
     all_questions = []
     
     if interview_type == "Technical":
-        all_questions.extend(generate_technical_questions(resume_data, difficulty, 8))
-        all_questions.extend(generate_resume_based_questions(resume_data, 3))
+        all_questions.extend(generate_technical_questions(resume_data, difficulty, 8, st.session_state.groq_client))
+        all_questions.extend(generate_resume_based_questions(resume_data, 3, st.session_state.groq_client))
     elif interview_type == "Behavioral":
-        all_questions.extend(generate_behavioral_questions(7))
-        all_questions.extend(generate_situational_questions(resume_data, 4))
+        all_questions.extend(generate_behavioral_questions(7, st.session_state.groq_client))
+        all_questions.extend(generate_situational_questions(resume_data, 4, st.session_state.groq_client))
     elif interview_type == "Mixed":
-        all_questions.extend(generate_technical_questions(resume_data, difficulty, 4))
-        all_questions.extend(generate_behavioral_questions(3))
-        all_questions.extend(generate_resume_based_questions(resume_data, 2))
+        all_questions.extend(generate_technical_questions(resume_data, difficulty, 4, st.session_state.groq_client))
+        all_questions.extend(generate_behavioral_questions(3, st.session_state.groq_client))
+        all_questions.extend(generate_resume_based_questions(resume_data, 2, st.session_state.groq_client))
     else:  # Full
-        all_questions.extend(generate_technical_questions(resume_data, difficulty, 5))
-        all_questions.extend(generate_behavioral_questions(4))
-        all_questions.extend(generate_situational_questions(resume_data, 3))
-        all_questions.extend(generate_resume_based_questions(resume_data, 3))
+        all_questions.extend(generate_technical_questions(resume_data, difficulty, 5, st.session_state.groq_client))
+        all_questions.extend(generate_behavioral_questions(4, st.session_state.groq_client))
+        all_questions.extend(generate_situational_questions(resume_data, 3, st.session_state.groq_client))
+        all_questions.extend(generate_resume_based_questions(resume_data, 3, st.session_state.groq_client))
     
     return {
         'interview_type': interview_type,
@@ -633,7 +615,7 @@ def generate_complete_interview_set(resume_data: Dict, interview_type: str, diff
     }
 
 # Answer Evaluation (from Cell 8)
-def evaluate_answer_with_groq(question: str, answer: str, question_type: str) -> Dict:
+def evaluate_answer_with_groq(question: str, answer: str, question_type: str, groq_client) -> Dict:
     """Evaluate interview answer."""
     prompt = f"""Evaluate this answer.
 
@@ -663,7 +645,7 @@ FEEDBACK:
 [2-3 sentences]"""
 
     try:
-        response = get_groq_client().chat.completions.create(
+        response = groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=800,
@@ -754,7 +736,7 @@ def conduct_mock_interview(resume_data: Dict, questions: List[Dict], answers: Li
         question = question_obj['question']
         question_type = question_obj['type']
         
-        evaluation = evaluate_answer_with_groq(question, answer, question_type)
+        evaluation = evaluate_answer_with_groq(question, answer, question_type, st.session_state.groq_client)
         sentiment = analyze_answer_sentiment(answer)
         
         result = {
@@ -820,7 +802,7 @@ Provide:
 4. 2-WEEK TIMELINE"""
 
     try:
-        response = get_groq_client().chat.completions.create(
+        response = st.session_state.groq_client.chat.completions.create(
             messages=[{"role": "user", "content": prompt}],
             model="llama-3.3-70b-versatile",
             max_tokens=800,
@@ -1287,8 +1269,6 @@ if 'initialized' not in st.session_state:
     st.session_state.interview_history = []
     st.session_state.current_interview = None
     st.session_state.api_keys_set = False
-    st.session_state.groq_api_key = None
-    st.session_state.gemini_api_key = None
     st.session_state.groq_client = None
     st.session_state.gemini_model = None
 
@@ -1305,68 +1285,31 @@ with st.sidebar:
         if st.button("✅ Save API Keys"):
             if groq_key and gemini_key:
                 try:
-                    # Store keys in session state for later use
-                    st.session_state.groq_api_key = groq_key
-                    st.session_state.gemini_api_key = gemini_key
+                    # Test Groq
+                    st.session_state.groq_client = Groq(api_key=groq_key)
+                    test = st.session_state.groq_client.chat.completions.create(
+                        messages=[{"role": "user", "content": "Hi"}],
+                        model="llama-3.3-70b-versatile",
+                        max_tokens=5
+                    )
                     
-                    # Initialize Gemini
+                    # Test Gemini
                     genai.configure(api_key=gemini_key)
                     st.session_state.gemini_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                    test2 = st.session_state.gemini_model.generate_content("Hi")
                     
                     st.session_state.api_keys_set = True
-                    st.success("✅ API keys saved successfully!")
+                    st.success("✅ API keys validated!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+                    st.error(f"❌ API validation failed: {str(e)}")
             else:
                 st.error("Please enter both API keys")
     else:
         st.success("✅ API Keys Configured")
-        
-        # Test Groq connection
-        if st.button("🧪 Test Groq API"):
-            try:
-                client = get_groq_client()
-                if client:
-                    response = client.chat.completions.create(
-                        messages=[{"role": "user", "content": "Say 'working' if you can hear me"}],
-                        model="llama-3.3-70b-versatile",
-                        max_tokens=10
-                    )
-                    st.success(f"✅ Groq API working! Response: {response.choices[0].message.content}")
-                else:
-                    st.error("❌ Groq client is None")
-            except Exception as e:
-                st.error(f"❌ Groq test failed: {str(e)}")
-        
         if st.button("🔄 Reset API Keys"):
             st.session_state.api_keys_set = False
-            st.session_state.groq_api_key = None
-            st.session_state.gemini_api_key = None
-            st.session_state.groq_client = None
-            st.session_state.gemini_model = None
             st.rerun()
-    
-    st.markdown("---")
-    
-    # Navigation
-    st.markdown("### 📍 Navigation")
-    page = st.radio(
-        "Go to:",
-        ["🏠 Home", "📄 Resume Analysis", "🎯 Job Matcher", "🎤 Mock Interview", "📊 Dashboard"],
-        label_visibility="collapsed",
-        key="navigation_radio"  # Add this unique key
-    )
-    
-    st.markdown("---")
-    st.markdown("### 📈 Quick Stats")
-    if st.session_state.resume_data:
-        st.metric("Skills Found", len(st.session_state.resume_data.get('skills', [])))
-    if st.session_state.interview_history:
-        st.metric("Interviews Done", len(st.session_state.interview_history))
-        avg_score = sum(i['overall_score'] for i in st.session_state.interview_history) / len(st.session_state.interview_history)
-        st.metric("Average Score", f"{avg_score:.1f}%")
-
     
     st.markdown("---")
     
@@ -1830,86 +1773,79 @@ else:
                     except Exception as e:
                         st.error(f"❌ Question generation failed: {str(e)}")
             
-# Interview Session
+            # Interview Session
             if st.session_state.current_interview:
                 st.markdown("---")
                 
                 questions = st.session_state.current_interview['questions']
                 current_q = st.session_state.current_interview['current_question']
                 
-                # Check if questions exist
-                if not questions or len(questions) == 0:
-                    st.error("❌ No questions were generated. Please try again.")
-                    if st.button("🔄 Generate New Questions"):
-                        st.session_state.current_interview = None
-                        st.rerun()
+                # Progress bar
+                progress = (current_q / len(questions)) * 100
+                st.progress(current_q / len(questions))
+                st.markdown(f"**Progress:** Question {current_q + 1} of {len(questions)} ({progress:.0f}%)")
+                
+                if current_q < len(questions):
+                    # Display current question
+                    question_obj = questions[current_q]
+                    
+                    st.markdown(f"""
+                        <div class="question-card">
+                            <span class="question-number">Question {current_q + 1}</span>
+                            <span class="badge badge-info" style="margin-left: 0.5rem;">{question_obj['type']}</span>
+                            <span class="badge badge-warning" style="margin-left: 0.5rem;">{question_obj['difficulty']}</span>
+                            <p style="margin-top: 1rem; font-size: 1.1rem; color: #1f2937;">{question_obj['question']}</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
+                    # Answer input
+                    answer = st.text_area(
+                        "Your Answer",
+                        height=200,
+                        placeholder="Type your answer here...",
+                        key=f"answer_{current_q}"
+                    )
+                    
+                    col1, col2, col3 = st.columns([1, 1, 2])
+                    
+                    with col1:
+                        if st.button("⏭️ Skip Question"):
+                            st.session_state.current_interview['answers'].append("")
+                            st.session_state.current_interview['current_question'] += 1
+                            st.rerun()
+                    
+                    with col2:
+                        if st.button("✅ Submit Answer", type="primary", disabled=not answer):
+                            st.session_state.current_interview['answers'].append(answer)
+                            st.session_state.current_interview['current_question'] += 1
+                            st.rerun()
+                
                 else:
-                    # Progress bar
-                    progress = (current_q / len(questions)) * 100
-                    st.progress(current_q / len(questions))
-                    st.markdown(f"**Progress:** Question {current_q + 1} of {len(questions)} ({progress:.0f}%)")
+                    # Interview completed - show evaluation
+                    st.markdown("---")
+                    st.success("🎉 Interview Complete! Evaluating your answers...")
                     
-                    if current_q < len(questions):
-                        # Display current question
-                        question_obj = questions[current_q]
-                        
-                        st.markdown(f"""
-                            <div class="question-card">
-                                <span class="question-number">Question {current_q + 1}</span>
-                                <span class="badge badge-info" style="margin-left: 0.5rem;">{question_obj['type']}</span>
-                                <span class="badge badge-warning" style="margin-left: 0.5rem;">{question_obj['difficulty']}</span>
-                                <p style="margin-top: 1rem; font-size: 1.1rem; color: #1f2937;">{question_obj['question']}</p>
-                            </div>
-                        """, unsafe_allow_html=True)
-                        
-                        # Answer input
-                        answer = st.text_area(
-                            "Your Answer",
-                            height=200,
-                            placeholder="Type your answer here...",
-                            key=f"answer_{current_q}"
-                        )
-                        
-                        col1, col2, col3 = st.columns([1, 1, 2])
-                        
-                        with col1:
-                            if st.button("⏭️ Skip Question"):
-                                st.session_state.current_interview['answers'].append("")
-                                st.session_state.current_interview['current_question'] += 1
+                    if st.button("📊 View Results", type="primary"):
+                        with st.spinner("Evaluating your performance..."):
+                            try:
+                                # Evaluate all answers
+                                results = conduct_mock_interview(
+                                    st.session_state.resume_data,
+                                    questions,
+                                    st.session_state.current_interview['answers']
+                                )
+                                
+                                # Save to history
+                                results['interview_type'] = st.session_state.current_interview['interview_type']
+                                save_interview_results(results)
+                                
+                                # Clear current interview
+                                st.session_state.current_interview = None
+                                st.session_state.interview_results = results
+                                
                                 st.rerun()
-                        
-                        with col2:
-                            if st.button("✅ Submit Answer", type="primary", disabled=not answer):
-                                st.session_state.current_interview['answers'].append(answer)
-                                st.session_state.current_interview['current_question'] += 1
-                                st.rerun()
-                    
-                    else:
-                        # Interview completed - show evaluation
-                        st.markdown("---")
-                        st.success("🎉 Interview Complete! Evaluating your answers...")
-                        
-                        if st.button("📊 View Results", type="primary"):
-                            with st.spinner("Evaluating your performance..."):
-                                try:
-                                    # Evaluate all answers
-                                    results = conduct_mock_interview(
-                                        st.session_state.resume_data,
-                                        questions,
-                                        st.session_state.current_interview['answers']
-                                    )
-                                    
-                                    # Save to history
-                                    results['interview_type'] = st.session_state.current_interview['interview_type']
-                                    save_interview_results(results)
-                                    
-                                    # Clear current interview
-                                    st.session_state.current_interview = None
-                                    st.session_state.interview_results = results
-                                    
-                                    st.rerun()
-                                except Exception as e:
-                                    st.error(f"❌ Evaluation failed: {str(e)}")
+                            except Exception as e:
+                                st.error(f"❌ Evaluation failed: {str(e)}")
             
             # Show results if available
             if 'interview_results' in st.session_state and st.session_state.interview_results:
